@@ -1,22 +1,30 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
-using System.Windows.Forms;
 
 namespace EspMod
 {
-    static class Program
+    class Program
     {
-        /// <summary>
-        /// The main entry point for the application.
-        /// </summary>
-        [STAThread]
-        static void Main()
+        static string Revision = "Espresso extraction model v1.1";
+
+        class Grain
         {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new Form1());
+            public 
+
+        }
+
+
+        static void Main(string[] args)
+        {
+            Console.WriteLine(Revision);
+
+
+
+
+            Console.ReadKey();
         }
     }
 }
