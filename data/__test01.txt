@@ -5,7 +5,7 @@ grounds_density_kg_m3			330
 grounds_volume_fraction			0.8272
 
 # this is volume fraction of void space in a coffee particle, fi_v as per Morony
-void_volume_fraction			0.644
+void_in_grounds_volume_fraction	0.644
 
 # assumption used in Moroney and Hendon that about 30% of total bean mass is soluble
 soluble_coffee_mass_fraction	0.3
@@ -22,7 +22,7 @@ particle_size_distributution_0  0.15
 particle_size_distributution_3  0.85
 
 # if the bean weight is not saved in the shot file, save it here
-dsv2_bean_weight				18.10
+dsv2_bean_weight				18.0
 
 shot_file_name					__test01.shot
 
@@ -31,4 +31,4 @@ shot_file_name					__test01.shot
 
 # modelling parameteres
 modelling_time_step_sec			1
-num_modelling_layers_in_puck    10
+num_modelling_layers_in_puck    1
