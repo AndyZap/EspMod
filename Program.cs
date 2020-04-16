@@ -9,17 +9,21 @@ namespace EspMod
 {
     class Program
     {
-        static string Revision = "Espresso extraction model v1.3";
+        static string Revision = "Espresso extraction model v1.4";
 
         public class Cell
         {
-            //public int num;
+            public static double diameter_mm;
+            public static double volume_mm3;
+            public static double void_volume_mm3;
 
-            public Cell()
+            public double        mass_g;
+            public double        num_of_these_cells;
+
+            public Cell(double n)
             {
-
+                num_of_these_cells = n;
             }
-
         }
 
         public class Grain
@@ -28,16 +32,36 @@ namespace EspMod
 
             public double total_volume_of_these_grains_mm3;
             public double total_soluble_mass_in_these_grains_g;
-            //public int    num_of_these_grains_mm3;
+
+            public double diameter_of_one_grain_mm;
+            public double volume_of_one_grain_mm3;
+            public double num_of_these_grains;
 
             public Grain(int level)
             {
-                for(int i = 0; i <= level; i++)
+                // for the calc we assume one center cell is surrounded by layers of cells
+                double num_cell_at_prev_size = 0;
+                for (int i = 1; i <= level; i++)
                 {
-                    cells.Add(new Cell());
-                }
-            }
+                    // calc per layer
+                    var grain_diam = Cell.diameter_mm + Cell.diameter_mm * 2 * (i - 1);
+                    var grain_vol = Math.PI * grain_diam * grain_diam * grain_diam / 6;
+                    var num_cells_per_grain = grain_vol / Cell.volume_mm3;
 
+                    var num_cells_per_level = num_cells_per_grain - num_cell_at_prev_size;
+
+                    cells.Add(new Cell(num_cells_per_level));
+
+                    num_cell_at_prev_size = num_cells_per_grain;
+
+                    if(i == level)
+                    {
+                        diameter_of_one_grain_mm = grain_diam;
+                        volume_of_one_grain_mm3 = grain_vol;
+                    }
+                }
+                num_of_these_grains = total_volume_of_these_grains_mm3 / volume_of_one_grain_mm3;
+            }
         }
 
         public class Layer
@@ -48,6 +72,7 @@ namespace EspMod
             public double layer_volume_mm3;
             public double grounds_volume_mm3;
             public double void_volume_mm3;
+            public double mass_g;
 
             public Layer()
             {
@@ -57,15 +82,13 @@ namespace EspMod
 
         public class Puck
         {
+            Log log;
             public bool has_errors = false;
 
-            Log             log;
-
-            //public int num;
             List<Layer> layers = new List<Layer>();
 
-            double volume_out = 0.0; // total volume and coffee mass in the cup
-            double mass_out = 0.0;
+            //double volume_out = 0.0; // total volume and coffee mass in the cup
+            //double mass_out = 0.0;
 
             double modelling_time_step_sec              = 1;
             int    num_modelling_layers_in_puck         = 10;
@@ -83,25 +106,25 @@ namespace EspMod
                 log = log_;
                 log.Write("");
 
-                // reset total volume and coffee mass in the cup
-                volume_out = 0.0;
-                mass_out = 0.0;
+                // load vars
+                modelling_time_step_sec                 = config.GetDouble("modelling_time_step_sec");          if (!Check(modelling_time_step_sec)) return;
+                num_modelling_layers_in_puck            = config.GetInt("num_modelling_layers_in_puck");        if (!Check(num_modelling_layers_in_puck)) return;
 
-                modelling_time_step_sec = config.GetDouble("modelling_time_step_sec"); if (!Check(modelling_time_step_sec)) return;
-                num_modelling_layers_in_puck = config.GetInt("num_modelling_layers_in_puck"); if (!Check(num_modelling_layers_in_puck)) return;
+                puck_diameter_mm                        = config.GetDouble("puck_diameter_mm");                 if (!Check(puck_diameter_mm)) return;
+                grounds_density_kg_m3                   = config.GetDouble("grounds_density_kg_m3");            if (!Check(grounds_density_kg_m3)) return;
 
-                puck_diameter_mm = config.GetDouble("puck_diameter_mm"); if (!Check(puck_diameter_mm)) return;
-                grounds_density_kg_m3 = config.GetDouble("grounds_density_kg_m3"); if (!Check(grounds_density_kg_m3)) return;
+                soluble_coffee_mass_fraction            = config.GetDouble("soluble_coffee_mass_fraction");     if (!Check(soluble_coffee_mass_fraction)) return;
+                coffee_cell_diameter_mm                 = config.GetDouble("coffee_cell_diameter_mm");          if (!Check(coffee_cell_diameter_mm)) return;
 
-                soluble_coffee_mass_fraction = config.GetDouble("soluble_coffee_mass_fraction"); if (!Check(soluble_coffee_mass_fraction)) return;
-                coffee_cell_diameter_mm = config.GetDouble("coffee_cell_diameter_mm"); if (!Check(coffee_cell_diameter_mm)) return;
+                dsv2_bean_weight                        = config.GetDouble("dsv2_bean_weight");                 if (!Check(dsv2_bean_weight)) return;
 
-                dsv2_bean_weight = config.GetDouble("dsv2_bean_weight"); if (!Check(dsv2_bean_weight)) return;
+                double grounds_volume_fraction          = config.GetDouble("grounds_volume_fraction");          if (!Check(grounds_volume_fraction)) return;
+                double void_in_grounds_volume_fraction  = config.GetDouble("void_in_grounds_volume_fraction");  if (!Check(void_in_grounds_volume_fraction)) return;
 
-                // load psd
+                // load PSD
                 Dictionary<int, double> psd = new Dictionary<int, double>();
                 double total = 0.0;
-                for (int i = 0; i < 100; i++) // get the max entry index for the PSD
+                for (int i = 0; i < 100; i++) // support up to 100 layers
                 {
                     if (config.HasKey("particle_size_distributution_" + i.ToString(), print_error: false))
                     {
@@ -111,24 +134,26 @@ namespace EspMod
                         total += psd_value;
                     }
                 }
-
                 if(Math.Abs(total-1) > 1E-3)
                 {
                     log.Write("ERROR: sum of the PSD values had to be 1");
                     return;
                 }
 
-                double puck_area_mm2 = Math.PI * puck_diameter_mm * puck_diameter_mm * 0.25;
-                double grounds_density_g_mm3 = grounds_density_kg_m3 * 1E3 * 1E-9;
-                double puck_volume_mm3 = dsv2_bean_weight / grounds_density_g_mm3;
-                double puck_height_mm = puck_volume_mm3 / puck_area_mm2;
+
+                // calculate the basic vars
+                double puck_area_mm2            = Math.PI * puck_diameter_mm * puck_diameter_mm * 0.25;
+                double grounds_density_g_mm3    = grounds_density_kg_m3 * 1E3 * 1E-9;
+                double puck_volume_mm3          = dsv2_bean_weight / grounds_density_g_mm3;
+                double puck_height_mm           = puck_volume_mm3 / puck_area_mm2;
+                double soluble_mass_per_layer   = dsv2_bean_weight * soluble_coffee_mass_fraction / num_modelling_layers_in_puck;
                 log.Write("puck_height_mm " + puck_height_mm.ToString());
 
 
-                double grounds_volume_fraction = config.GetDouble("grounds_volume_fraction"); if (!Check(grounds_volume_fraction)) return;
-                double void_in_grounds_volume_fraction = config.GetDouble("void_in_grounds_volume_fraction"); if (!Check(void_in_grounds_volume_fraction)) return;
-
-                double soluble_mass_per_layer = dsv2_bean_weight * soluble_coffee_mass_fraction / num_modelling_layers_in_puck;
+                // setting up static vars for Cell. Assume cells are little cubes when calculating the volume
+                Cell.diameter_mm = coffee_cell_diameter_mm;
+                Cell.volume_mm3 = coffee_cell_diameter_mm * coffee_cell_diameter_mm * coffee_cell_diameter_mm;
+                Cell.void_volume_mm3 = Cell.volume_mm3 * void_in_grounds_volume_fraction;
 
                 // setting up layers
                 for (int i = 0; i < num_modelling_layers_in_puck; i++)
@@ -143,31 +168,34 @@ namespace EspMod
 
                     foreach(int key in psd.Keys)
                     {
-                        Grain g = new Grain(key);
-                        g.total_volume_of_these_grains_mm3 = layer.grounds_volume_mm3 * psd[key];
-                        g.total_soluble_mass_in_these_grains_g = soluble_mass_per_layer * psd[key];
-
-                        /* check!
-                        var initial_concentration = g.total_soluble_mass_in_these_grains_g / 
-                            (g.total_volume_of_these_grains_mm3 * void_in_grounds_volume_fraction);
-
-                        log.Write("initial_concentration inside grain " + initial_concentration.ToString());
-
-                        initial_concentration 0.000185839830844456
-                        good: 185 kg/m3
-
                         if (key == 0)
                         {
-                            var initial_concentration_in_void = g.total_soluble_mass_in_these_grains_g / layer.void_volume_mm3;
-                            log.Write("initial_concentration between grains " + initial_concentration_in_void.ToString());
+                            layer.mass_g = soluble_mass_per_layer * psd[key];
+
+                            var initial_concentration_in_void = layer.mass_g / layer.void_volume_mm3;
+                            log.Write("initial_concentration between grains " + initial_concentration_in_void.ToString("0.0000000"));
+
+                            //initial_concentration between grains 8.59375E-05
+                            //0.08E-3 g per 1E-3 g(this is 1 mm3 weight) => 8 % TDS in the void.Looks correct.
                         }
+                        else
+                        {
+                            Grain g = new Grain(key);
+                            g.total_volume_of_these_grains_mm3 = layer.grounds_volume_mm3 * psd[key];
+                            g.total_soluble_mass_in_these_grains_g = soluble_mass_per_layer * psd[key];
+                            g.num_of_these_grains = g.total_volume_of_these_grains_mm3 / g.volume_of_one_grain_mm3;
 
-                        initial_concentration between grains 8.59375E-05
-                        0.08E-3 g per 1E-3 g (this is 1 mm3 weight) => 8% TDS in the void. Looks correct.
-                        */
+                            // checks!
+                            var initial_concentration = g.total_soluble_mass_in_these_grains_g / 
+                                (g.total_volume_of_these_grains_mm3 * void_in_grounds_volume_fraction);
 
+                            log.Write("initial_concentration inside grain   " + initial_concentration.ToString("0.0000000"));
+                            //
+                            //initial_concentration 0.000185839830844456
+                            //good: 185 kg/m3 => TDS 18.5% in cells
 
-                        layer.grains[key] = g;
+                            layer.grains[key] = g;
+                        }
                     }
 
                     layers.Add(layer);
