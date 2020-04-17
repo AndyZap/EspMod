@@ -20,6 +20,8 @@ particle_size_distributution_0  0.15
 #
 # % particles with 3 layers, i.e. 1 cell in the middle + 2 layers => 1*0.3 + 2*(2*0.3) = 0.15 mm diameter
 particle_size_distributution_3  0.85
+#particle_size_distributution_3  0.75
+#particle_size_distributution_4  0.10
 
 # if the bean weight is not saved in the shot file, save it here
 dsv2_bean_weight				18.0
