@@ -9,7 +9,7 @@ namespace EspMod
 {
     class Program
     {
-        static string Revision = "Espresso extraction model v1.6";
+        static string Revision = "Espresso extraction model v1.7";
 
         public class Cell
         {
@@ -133,6 +133,7 @@ namespace EspMod
             public double grounds_volume_mm3;
             public double void_volume_mm3;
             public double mass_g;
+            public double delta_mass_g;
 
             public Layer()
             {
@@ -150,28 +151,29 @@ namespace EspMod
 
             public void SimulateGrainIntoVoidDiffusion()
             {
-                // Grain diffusion
-                double delta_mass_g = 0;
+                delta_mass_g = 0;
                 foreach (int key in grains.Keys)
                 {
                     var grain = grains[key];
+
+                    // cell 2 cell
                     grain.SimulateCell2CellDiffusion();
 
                     // outer cell to void transfer
+                    var outer_cell_index = grain.cells.Count - 1;
                     var delta_m_out = Cell.K_the_coefficient * Cell.modelling_time_step_sec *
-                        (grain.mass_g[grain.cells.Count-1]/Cell.void_volume_mm3 - mass_g / void_volume_mm3);
+                        (grain.mass_g[outer_cell_index] / Cell.void_volume_mm3 - mass_g / void_volume_mm3);
 
-                    grain.delta_mass_g[grain.cells.Count - 1] -= delta_m_out;
+                    grain.delta_mass_g[outer_cell_index] -= delta_m_out;
 
                     delta_mass_g += delta_m_out * grain.num_of_these_grains;
                 }
             }
-
         }
 
         public class Puck
         {
-            Log log;
+            Log    log;
             public bool has_errors = false;
 
             List<Layer> layers = new List<Layer>();
@@ -338,7 +340,16 @@ namespace EspMod
 
                 Cell.K_the_coefficient = 1.0;
                 Cell.modelling_time_step_sec = modelling_time_step_sec;
+                var fresh_water_mm3 = 1.0;
 
+                if(fresh_water_mm3 > layers[0].void_volume_mm3 * 0.3)
+                {
+                    log.Write("ERROR: Please decrease the time step, fresh water takes more than 30% of the layer volume");
+                    has_errors = true;
+                    return;
+                }
+
+                // assume for a start that water moves at constant 1 ml/sec speed, i.e. fresh_water_ml = 1
                 do
                 {
                     timestamp += modelling_time_step_sec;
@@ -347,8 +358,30 @@ namespace EspMod
                     foreach (Layer layer in layers)
                         layer.SimulateGrainIntoVoidDiffusion();
 
+                    // flow of the fresh water
+                    var layer_0 = layers[0];
 
+                    var prev_delta_layer_mass_g = layer_0.mass_g * (fresh_water_mm3 / layer_0.void_volume_mm3);
+                    layer_0.delta_mass_g -= prev_delta_layer_mass_g;
 
+                    for (int i = 1; i < layers.Count; i++)
+                    {
+                        var layer_i = layers[i];
+                        var current_delta_layer_mass_g = layer_i.mass_g * (fresh_water_mm3 / layer_i.void_volume_mm3);
+
+                        layer_i.delta_mass_g += prev_delta_layer_mass_g;
+                        layer_i.delta_mass_g -= current_delta_layer_mass_g;
+
+                        prev_delta_layer_mass_g = current_delta_layer_mass_g;
+                    }
+
+                    // update in the cup values
+                    volume_in_cup_mm3 += fresh_water_mm3;
+                    mass_in_cup_g += prev_delta_layer_mass_g;
+
+                    // update mass values
+
+                    Print(timestamp);
                 }
                 while (timestamp < 10.0);
             }
