@@ -9,15 +9,16 @@ namespace EspMod
 {
     class Program
     {
-        static string Revision = "Espresso extraction model v1.5";
+        static string Revision = "Espresso extraction model v1.6";
 
         public class Cell
         {
             public static double diameter_mm;
             public static double volume_mm3;
             public static double void_volume_mm3;
+            public static double K_the_coefficient;
+            public static double modelling_time_step_sec;
 
-            public double        mass_g;
             public double        num_of_these_cells;
 
             public Cell(double n)
@@ -30,6 +31,11 @@ namespace EspMod
         {
             public List<Cell> cells = new List<Cell>();
 
+            public double[] mass_g;
+            public double[] delta_mass_g;
+            public double[] cell_count_coeff;
+            public double cell_2_cell_coeff;
+
             public double total_volume_of_these_grains_mm3;
             public double total_soluble_mass_in_these_grains_g;
 
@@ -40,6 +46,12 @@ namespace EspMod
 
             public Grain(int level)
             {
+                mass_g = new double[level];
+                delta_mass_g = new double[level];
+                cell_count_coeff = new double[level];
+                cell_2_cell_coeff = Cell.K_the_coefficient * Cell.modelling_time_step_sec / Cell.void_volume_mm3;
+
+
                 // for the calc we assume one center cell is surrounded by layers of cells
                 double num_cell_at_prev_size = 0;
                 for (int i = 0; i < level; i++)
@@ -60,8 +72,15 @@ namespace EspMod
                         diameter_of_one_grain_mm = grain_diam;
                         volume_of_one_grain_mm3 = grain_vol;
                     }
+
+                    delta_mass_g[i] = 0.0;
                 }
                 num_of_these_grains = total_volume_of_these_grains_mm3 / volume_of_one_grain_mm3;
+
+
+                cell_count_coeff[0] = 1.0;
+                for (int i = 1; i < level; i++)
+                    cell_count_coeff[i] = cells[i - 1].num_of_these_cells / cells[i].num_of_these_cells;
             }
 
             public double GetTotalNumCells()
@@ -76,7 +95,7 @@ namespace EspMod
             public void SetInitalMassPerCell(double mass)
             {
                 for (int i = 0; i < cells.Count; i++)
-                    cells[i].mass_g = mass;
+                    mass_g[i] = mass;
             }
 
             public void Print(Log log, int index)
@@ -85,12 +104,23 @@ namespace EspMod
                 sb.Append("   Grains with " + index.ToString() + " cell layers; Per layer TDS=");
                 for(int i = cells.Count-1; i>=0; i--)
                 {
-                    var tds = 1E5 * cells[i].mass_g / Cell.void_volume_mm3;
+                    var tds = 1E5 * mass_g[i] / Cell.void_volume_mm3;
                     sb.Append(tds.ToString("0.00").PadLeft(6));
                     if(i != 0)
                         sb.Append(", ");
                 }
                 log.Write(sb.ToString());
+            }
+
+            public void SimulateCell2CellDiffusion()
+            {
+                // cell 2 cell tranfer
+                for(int i = 0; i < cells.Count-1; i++)
+                {
+                    var delta_m          = cell_2_cell_coeff * (mass_g[i] - mass_g[i + 1]);
+                    delta_mass_g[i]     -= delta_m;
+                    delta_mass_g[i + 1] += delta_m * cell_count_coeff[i + 1];
+                }
             }
         }
 
@@ -117,6 +147,26 @@ namespace EspMod
 
                 log.Write("");
             }
+
+            public void SimulateGrainIntoVoidDiffusion()
+            {
+                // Grain diffusion
+                double delta_mass_g = 0;
+                foreach (int key in grains.Keys)
+                {
+                    var grain = grains[key];
+                    grain.SimulateCell2CellDiffusion();
+
+                    // outer cell to void transfer
+                    var delta_m_out = Cell.K_the_coefficient * Cell.modelling_time_step_sec *
+                        (grain.mass_g[grain.cells.Count-1]/Cell.void_volume_mm3 - mass_g / void_volume_mm3);
+
+                    grain.delta_mass_g[grain.cells.Count - 1] -= delta_m_out;
+
+                    delta_mass_g += delta_m_out * grain.num_of_these_grains;
+                }
+            }
+
         }
 
         public class Puck
@@ -283,8 +333,24 @@ namespace EspMod
             }
 
             public void Simulate()
-            { 
+            {
+                double timestamp = 0.0;
 
+                Cell.K_the_coefficient = 1.0;
+                Cell.modelling_time_step_sec = modelling_time_step_sec;
+
+                do
+                {
+                    timestamp += modelling_time_step_sec;
+
+                    // diffusion from grains
+                    foreach (Layer layer in layers)
+                        layer.SimulateGrainIntoVoidDiffusion();
+
+
+
+                }
+                while (timestamp < 10.0);
             }
         }
 
@@ -314,7 +380,6 @@ namespace EspMod
                     }
                 }
             }
-
 
             public bool LoadFile(string fname)
             {
@@ -394,7 +459,6 @@ namespace EspMod
                     return int.MinValue;
                 }
             }
-
         }
 
         public class Log
