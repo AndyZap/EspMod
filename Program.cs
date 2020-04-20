@@ -9,7 +9,7 @@ namespace EspMod
 {
     class Program
     {
-        static string Revision = "Espresso extraction model v1.7";
+        static string Revision = "Espresso extraction model v1.8";
 
         public class Cell
         {
@@ -34,7 +34,6 @@ namespace EspMod
             public double[] mass_g;
             public double[] delta_mass_g;
             public double[] cell_count_coeff;
-            public double cell_2_cell_coeff;
 
             public double total_volume_of_these_grains_mm3;
             public double total_soluble_mass_in_these_grains_g;
@@ -49,8 +48,6 @@ namespace EspMod
                 mass_g = new double[level];
                 delta_mass_g = new double[level];
                 cell_count_coeff = new double[level];
-                cell_2_cell_coeff = Cell.K_the_coefficient * Cell.modelling_time_step_sec / Cell.void_volume_mm3;
-
 
                 // for the calc we assume one center cell is surrounded by layers of cells
                 double num_cell_at_prev_size = 0;
@@ -114,13 +111,24 @@ namespace EspMod
 
             public void SimulateCell2CellDiffusion()
             {
+                double cell_2_cell_coeff = Cell.K_the_coefficient * Cell.modelling_time_step_sec / Cell.void_volume_mm3;
+
+                // reset delta mass
+                for (int i = 0; i < cells.Count; i++)
+                    delta_mass_g[i] = 0.0;
+
                 // cell 2 cell tranfer
-                for(int i = 0; i < cells.Count-1; i++)
+                for (int i = 0; i < cells.Count-1; i++)
                 {
                     var delta_m          = cell_2_cell_coeff * (mass_g[i] - mass_g[i + 1]);
                     delta_mass_g[i]     -= delta_m;
                     delta_mass_g[i + 1] += delta_m * cell_count_coeff[i + 1];
                 }
+            }
+            public void UpdateMass()
+            {
+                for (int i = 0; i < cells.Count; i++)
+                    mass_g[i] += delta_mass_g[i];
             }
         }
 
@@ -166,7 +174,7 @@ namespace EspMod
 
                     grain.delta_mass_g[outer_cell_index] -= delta_m_out;
 
-                    delta_mass_g += delta_m_out * grain.num_of_these_grains;
+                    delta_mass_g += delta_m_out * grain.num_of_these_grains * grain.cells[outer_cell_index].num_of_these_cells;
                 }
             }
         }
@@ -182,7 +190,9 @@ namespace EspMod
             double mass_in_cup_g                        = 0.0;
 
             double modelling_time_step_sec              = 1;
+            double modelling_total_time_sec             = 2;
             int    num_modelling_layers_in_puck         = 10;
+
 
             double puck_diameter_mm                     = 58.5;
             double grounds_density_kg_m3                = 330;
@@ -199,6 +209,7 @@ namespace EspMod
 
                 // load vars
                 modelling_time_step_sec                 = config.GetDouble("modelling_time_step_sec");          if (!Check(modelling_time_step_sec)) return;
+                modelling_total_time_sec                = config.GetInt("modelling_total_time_sec");            if (!Check(modelling_total_time_sec)) return;
                 num_modelling_layers_in_puck            = config.GetInt("num_modelling_layers_in_puck");        if (!Check(num_modelling_layers_in_puck)) return;
 
                 puck_diameter_mm                        = config.GetDouble("puck_diameter_mm");                 if (!Check(puck_diameter_mm)) return;
@@ -325,22 +336,35 @@ namespace EspMod
                 log.Write("Time=" + timestamp.ToString("0.00") + " sec");
                 log.Write("");
 
-                for (int i = 0; i < layers.Count; i++)
-                    layers[i].Print(log, i);
+                if (layers.Count == 1)
+                    layers[0].Print(log, 0);
+                else if (layers.Count == 2)
+                {
+                    layers[0].Print(log, 0);
+                    layers[1].Print(log, 1);
+                }
+                else if (layers.Count > 2)
+                {
+                    layers[0].Print(log, 0);
+                    layers[layers.Count / 2].Print(log, layers.Count / 2);
+                    layers[layers.Count - 1].Print(log, layers.Count - 1);
+                }
 
                 var tds = volume_in_cup_mm3 == 0 ? 0.0 : 1E5 * mass_in_cup_g / volume_in_cup_mm3;
                 var ey = 100.0 * mass_in_cup_g / dsv2_bean_weight;
-                log.Write("In the cup: Volume_ml=" + volume_in_cup_mm3.ToString("0.000") + " TDS=" + tds.ToString("0.00") + " EY=" + ey.ToString("0.0"));
-                log.Write("-------------------------------------------------------------------------------");
+                log.Write("In the cup: Volume_ml=" + (1E-3* volume_in_cup_mm3).ToString("0.000") +
+                          " Mass_g=" + mass_in_cup_g.ToString("0.00") +
+                          " TDS%=" + tds.ToString("0.00") + 
+                          " EY%=" + ey.ToString("0.0"));
             }
 
             public void Simulate()
             {
                 double timestamp = 0.0;
 
-                Cell.K_the_coefficient = 1.0;
+                var fresh_water_mm3 = 1.0E3 * modelling_time_step_sec;  // 1 ml
+                Cell.K_the_coefficient = 0.2 * Cell.void_volume_mm3;
                 Cell.modelling_time_step_sec = modelling_time_step_sec;
-                var fresh_water_mm3 = 1.0;
 
                 if(fresh_water_mm3 > layers[0].void_volume_mm3 * 0.3)
                 {
@@ -358,7 +382,9 @@ namespace EspMod
                     foreach (Layer layer in layers)
                         layer.SimulateGrainIntoVoidDiffusion();
 
+
                     // flow of the fresh water
+                    
                     var layer_0 = layers[0];
 
                     var prev_delta_layer_mass_g = layer_0.mass_g * (fresh_water_mm3 / layer_0.void_volume_mm3);
@@ -378,12 +404,24 @@ namespace EspMod
                     // update in the cup values
                     volume_in_cup_mm3 += fresh_water_mm3;
                     mass_in_cup_g += prev_delta_layer_mass_g;
+                    
 
                     // update mass values
+                    for (int i = 0; i < layers.Count; i++)
+                    {
+                        var layer_i = layers[i];
+                        layer_i.mass_g += layer_i.delta_mass_g;
+
+                        foreach(int key in layer_i.grains.Keys)
+                        {
+                            layer_i.grains[key].UpdateMass();
+                        }
+                    }
+
 
                     Print(timestamp);
                 }
-                while (timestamp < 10.0);
+                while (timestamp < modelling_total_time_sec);
             }
         }
 

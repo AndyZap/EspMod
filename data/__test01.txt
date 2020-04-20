@@ -32,5 +32,6 @@ shot_file_name					__test01.shot
 
 
 # modelling parameteres
-modelling_time_step_sec			1
-num_modelling_layers_in_puck    1
+modelling_time_step_sec			0.2
+modelling_total_time_sec		20
+num_modelling_layers_in_puck    10
