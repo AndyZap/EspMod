@@ -190,6 +190,7 @@ namespace EspMod
             double mass_in_cup_g                        = 0.0;
 
             double modelling_time_step_sec              = 1;
+            double modelling_print_step_sec             = 2;
             double modelling_total_time_sec             = 2;
             int    num_modelling_layers_in_puck         = 10;
 
@@ -209,6 +210,7 @@ namespace EspMod
 
                 // load vars
                 modelling_time_step_sec                 = config.GetDouble("modelling_time_step_sec");          if (!Check(modelling_time_step_sec)) return;
+                modelling_print_step_sec                = config.GetDouble("modelling_print_step_sec");         if (!Check(modelling_print_step_sec)) return;
                 modelling_total_time_sec                = config.GetInt("modelling_total_time_sec");            if (!Check(modelling_total_time_sec)) return;
                 num_modelling_layers_in_puck            = config.GetInt("num_modelling_layers_in_puck");        if (!Check(num_modelling_layers_in_puck)) return;
 
@@ -275,7 +277,8 @@ namespace EspMod
                             layer.mass_g = soluble_mass_per_layer * psd[key];
 
                             var initial_concentration_in_void = layer.mass_g / layer.void_volume_mm3;
-                            log.Write("initial_concentration between grains " + initial_concentration_in_void.ToString("0.0000000"));
+                            if(i == 0)
+                                log.Write("initial_concentration between grains " + initial_concentration_in_void.ToString("0.0000000"));
 
                             //initial_concentration between grains 8.59375E-05
                             //0.08E-3 g per 1E-3 g(this is 1 mm3 weight) => 8 % TDS in the void.Looks correct.
@@ -294,10 +297,12 @@ namespace EspMod
                             // checks!
                             var initial_concentration = g.total_soluble_mass_in_these_grains_g / 
                                 (g.total_volume_of_these_grains_mm3 * void_in_grounds_volume_fraction);
-                            log.Write("initial_concentration inside grain   " + initial_concentration.ToString("0.0000000"));
+                            if (i == 0)
+                                log.Write("initial_concentration inside grain   " + initial_concentration.ToString("0.0000000"));
 
                             initial_concentration = mass_per_cell / Cell.void_volume_mm3;
-                            log.Write("initial_concentration inside g_alt   " + initial_concentration.ToString("0.0000000"));
+                            if (i == 0)
+                                log.Write("initial_concentration inside g_alt   " + initial_concentration.ToString("0.0000000"));
 
                             //initial_concentration 0.000185839830844456
                             //good: 185 kg/m3 => TDS 18.5% in cells
@@ -361,8 +366,9 @@ namespace EspMod
             public void Simulate()
             {
                 double timestamp = 0.0;
+                double last_print_time = 0.0;
 
-                var fresh_water_mm3 = 1.0E3 * modelling_time_step_sec;  // 1 ml
+                var fresh_water_mm3 = 2.0E3 * modelling_time_step_sec;  // 1 ml
                 Cell.K_the_coefficient = 0.2 * Cell.void_volume_mm3;
                 Cell.modelling_time_step_sec = modelling_time_step_sec;
 
@@ -382,9 +388,7 @@ namespace EspMod
                     foreach (Layer layer in layers)
                         layer.SimulateGrainIntoVoidDiffusion();
 
-
                     // flow of the fresh water
-                    
                     var layer_0 = layers[0];
 
                     var prev_delta_layer_mass_g = layer_0.mass_g * (fresh_water_mm3 / layer_0.void_volume_mm3);
@@ -418,8 +422,11 @@ namespace EspMod
                         }
                     }
 
-
-                    Print(timestamp);
+                    if ((timestamp - last_print_time + 0.001) > modelling_print_step_sec) // bump the time delta for robust interval comparison
+                    {
+                        Print(timestamp);
+                        last_print_time = timestamp;
+                    }
                 }
                 while (timestamp < modelling_total_time_sec);
             }
