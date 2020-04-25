@@ -16,7 +16,7 @@ namespace EspMod
             public static double diameter_mm;
             public static double volume_mm3;
             public static double void_volume_mm3;
-            public static double K_the_coefficient;
+            public static double Kstar_the_coefficient;
             public static double modelling_time_step_sec;
 
             public double        num_of_these_cells;
@@ -111,7 +111,7 @@ namespace EspMod
 
             public void SimulateCell2CellDiffusion()
             {
-                double cell_2_cell_coeff = Cell.K_the_coefficient * Cell.modelling_time_step_sec / Cell.void_volume_mm3;
+                double cell_2_cell_coeff = Cell.Kstar_the_coefficient * Cell.modelling_time_step_sec / Cell.void_volume_mm3;
 
                 // reset delta mass
                 for (int i = 0; i < cells.Count; i++)
@@ -169,7 +169,7 @@ namespace EspMod
 
                     // outer cell to void transfer
                     var outer_cell_index = grain.cells.Count - 1;
-                    var delta_m_out = Cell.K_the_coefficient * Cell.modelling_time_step_sec *
+                    var delta_m_out = Cell.Kstar_the_coefficient * Cell.modelling_time_step_sec *
                         (grain.mass_g[outer_cell_index] / Cell.void_volume_mm3 - mass_g / void_volume_mm3);
 
                     grain.delta_mass_g[outer_cell_index] -= delta_m_out;
@@ -363,20 +363,20 @@ namespace EspMod
                           " EY%=" + ey.ToString("0.0"));
             }
 
-            public void Simulate()
+            public double Simulate(double k_the_coefficient, bool print_to_log = false)
             {
                 double timestamp = 0.0;
                 double last_print_time = 0.0;
 
-                var fresh_water_mm3 = 2.0E3 * modelling_time_step_sec;  // 1 ml
-                Cell.K_the_coefficient = 0.2 * Cell.void_volume_mm3;
+                var fresh_water_mm3 = 1.0E3 * modelling_time_step_sec;  // 1 ml
+                Cell.Kstar_the_coefficient = k_the_coefficient * Cell.void_volume_mm3;
                 Cell.modelling_time_step_sec = modelling_time_step_sec;
 
                 if(fresh_water_mm3 > layers[0].void_volume_mm3 * 0.3)
                 {
                     log.Write("ERROR: Please decrease the time step, fresh water takes more than 30% of the layer volume");
                     has_errors = true;
-                    return;
+                    return 0.0;
                 }
 
                 // assume for a start that water moves at constant 1 ml/sec speed, i.e. fresh_water_ml = 1
@@ -424,11 +424,120 @@ namespace EspMod
 
                     if ((timestamp - last_print_time + 0.001) > modelling_print_step_sec) // bump the time delta for robust interval comparison
                     {
-                        Print(timestamp);
+                        if(print_to_log)
+                            Print(timestamp);
                         last_print_time = timestamp;
                     }
                 }
                 while (timestamp < modelling_total_time_sec);
+
+                return 0.0; // TODO
+            }
+
+            // This is the famous Zeroin from Forthyte book. Initially had it on punchcards in Fortran 
+            double Zeroin(double Ax, double Bx,  // search interval
+                          double Tol)            // answer tolerance
+            {
+                double A, B, C, D, E, Eps, FA, FB, FC, Toll, Xm, P, Q, R, S;
+
+                // Calculation Of comp. Epsilon
+                Eps = 1.0;
+                while ((1.0 + Eps / 2.0) != 1.0)
+                {
+                    Eps /= 2.0;
+                }
+
+                // Start Values
+                A = Ax; B = Bx;
+                FA = Simulate(A);
+                FB = Simulate(B);
+
+                // Start Step
+                do
+                {
+                    C = A; FC = FA;
+                    D = B - A; E = D;
+
+                Lab30:
+                    if (Math.Abs(FC) < Math.Abs(FB))
+                    {
+                        A = B; B = C; C = A;
+                        FA = FB; FB = FC; FC = FA;
+                    }
+                    // Test Of Collapsing
+                    Toll = 2.0 * Eps * Math.Abs(B) + Tol / 2.0;
+                    Xm = (C - B) / 2.0;
+
+                    if ((Math.Abs(Xm) <= Toll) || (FB == 0.0))
+                    {
+                        // End of Job and exit
+                        return B;
+                    }
+
+                    // Is Bisection Needed ??
+                    if ((Math.Abs(E) < Toll) || (Math.Abs(FA) <= Math.Abs(FB)))
+                    {
+                        // Bisection
+                        D = Xm; E = D;
+                    }
+                    else
+                    //Is Square interpolation possible ??
+                    {
+                        if (A == C)
+                        {
+                            // Line Interpolation}
+                            S = FB / FA;
+                            P = 2.0 * Xm * S;
+                            Q = 1.0 - S;
+                        }
+                        else
+                        // Inverse Square Interpolation
+                        {
+                            Q = FA / FC;
+                            R = FB / FC;
+                            S = FB / FA;
+                            P = S * (2.0 * Xm * Q * (Q - R) - (B - A) * (R - 1.0));
+                            Q = (Q - 1.0) * (R - 1.0) * (S - 1.0);
+                        }
+                        // Choose the Signs
+                        if (P > 0) Q = -Q;
+                        P = Math.Abs(P);
+
+                        // Is Square interpolation possible ??
+                        // Is Interpolation possible ??
+                        if ((2.0 * P < (3.0 * Xm * Q - Math.Abs(Toll) * Q)) && (P < Math.Abs(E * Q / 2.0)))
+                        {
+                            E = D; D = P / Q;
+                        }
+                        else
+                        // Bisection
+                        {
+                            D = Xm; E = D;
+                        }
+                    }
+
+                    // End of step
+                    A = B;
+                    FA = FB;
+                    if (Math.Abs(D) > Toll)
+                    {
+                        B += D;
+                    }
+                    else
+                    {
+                        if (Xm < 0.0)
+                        {
+                            B -= Math.Abs(Toll);
+                        }
+                        else
+                        {
+                            B += Math.Abs(Toll);
+                        }
+                    }
+                    FB = Simulate (B);
+                    if (FB * (FC / Math.Abs(FC)) <= 0.0) goto Lab30;
+                }
+                while (true);
             }
         }
 
@@ -583,9 +692,18 @@ namespace EspMod
 
             puck.Print(timestamp: 0.0);
 
-            puck.Simulate();
+
+            double k_the_coefficient = config.GetDouble("k_the_coefficient");
+            if(k_the_coefficient == double.MinValue)
+            {
+                Console.WriteLine("ERROR: cannot find entry k_the_coefficient in the input file");
+                return;
+            }
+
+            puck.Simulate(k_the_coefficient);
 
             Console.WriteLine("Finished");
+
         }
     }
 }

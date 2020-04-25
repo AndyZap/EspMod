@@ -13,25 +13,31 @@ soluble_coffee_mass_fraction	0.3
 # assuming that coffee cells are about 30 um
 coffee_cell_diameter_mm			0.03
 
-# ground particle size distributution, % by volume of particles with 0 (==fines), 1, 2, etc cell layers
+# ground particle size distributution, % by volume of particles with 0 (==fines), 1, 2, etc num cell rings
 #
 # % fines
 particle_size_distributution_0  0.15
 #
-# % particles with 3 layers, i.e. 1 cell in the middle + 2 layers => 1*0.3 + 2*(2*0.3) = 0.15 mm diameter
+# % particles with 3 cell rings, i.e. 1 cell in the middle + 2 cell rings => 1*0.3 + 2*(2*0.3) = 0.15 mm diameter
 particle_size_distributution_3  0.85
 #particle_size_distributution_3  0.75
 #particle_size_distributution_4  0.10
 
-# if the bean weight is not saved in the shot file, save it here
+# if the bean weight (in grams) is not saved in the shot file, save it here
 dsv2_bean_weight				18.0
+
+measured_tds					20.0
 
 shot_file_name					__test01.shot
 
 
 
 # modelling parameteres
-modelling_time_step_sec			0.1
+modelling_time_step_sec			1
 modelling_print_step_sec		2
 modelling_total_time_sec		20
-num_modelling_layers_in_puck    10
+num_modelling_layers_in_puck    1
+k_the_coefficient               0.4
+
+# modelling_mode: select from "calibrate" and "simulate"
+modelling_mode					simulate
