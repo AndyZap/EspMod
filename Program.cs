@@ -698,7 +698,7 @@ namespace EspMod
                 return;
             }
 
-            puck.Simulate(k_the_coefficient);
+            puck.Simulate(k_the_coefficient, print_to_log: true);
 
             Console.WriteLine("Finished");
 
