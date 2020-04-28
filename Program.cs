@@ -11,7 +11,7 @@ namespace EspMod
 
         public class Cell
         {
-            public static double diameter_mm;
+            public static double size_mm;
             public static double volume_mm3;
             public static double void_volume_mm3;
             public static double Kstar_the_coefficient;
@@ -52,7 +52,7 @@ namespace EspMod
                 for (int i = 0; i < level; i++)
                 {
                     // calc per layer
-                    var grain_diam = Cell.diameter_mm + Cell.diameter_mm * 2 * i;
+                    var grain_diam = Cell.size_mm + Cell.size_mm * 2 * i;
                     var grain_vol = Math.PI * grain_diam * grain_diam * grain_diam / 6;
                     var num_cells_per_grain = grain_vol / Cell.volume_mm3;
 
@@ -197,7 +197,7 @@ namespace EspMod
             double grounds_density_kg_m3                = 330;
 
             double soluble_coffee_mass_fraction         = 0.3;
-            double coffee_cell_diameter_mm              = 0.03;
+            double coffee_cell_size_mm                  = 0.03;
 
             double dsv2_bean_weight                     = 18.0;
 
@@ -216,7 +216,7 @@ namespace EspMod
                 grounds_density_kg_m3                   = config.GetDouble("grounds_density_kg_m3");            if (!Check(grounds_density_kg_m3)) return;
 
                 soluble_coffee_mass_fraction            = config.GetDouble("soluble_coffee_mass_fraction");     if (!Check(soluble_coffee_mass_fraction)) return;
-                coffee_cell_diameter_mm                 = config.GetDouble("coffee_cell_diameter_mm");          if (!Check(coffee_cell_diameter_mm)) return;
+                coffee_cell_size_mm                     = config.GetDouble("coffee_cell_size_mm");              if (!Check(coffee_cell_size_mm)) return;
 
                 dsv2_bean_weight                        = config.GetDouble("dsv2_bean_weight");                 if (!Check(dsv2_bean_weight)) return;
 
@@ -253,8 +253,8 @@ namespace EspMod
 
 
                 // setting up static vars for Cell. Assume cells are little cubes when calculating the volume
-                Cell.diameter_mm = coffee_cell_diameter_mm;
-                Cell.volume_mm3 = Math.PI * coffee_cell_diameter_mm * coffee_cell_diameter_mm * coffee_cell_diameter_mm / 6;
+                Cell.size_mm = coffee_cell_size_mm;
+                Cell.volume_mm3 = Math.PI * coffee_cell_size_mm * coffee_cell_size_mm * coffee_cell_size_mm / 6;
                 Cell.void_volume_mm3 = Cell.volume_mm3 * void_in_grounds_volume_fraction;
 
                 // setting up layers
