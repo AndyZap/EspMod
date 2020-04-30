@@ -23,13 +23,17 @@ particle_size_distributution_3  0.85
 #particle_size_distributution_3  0.75
 #particle_size_distributution_4  0.10
 
+# refer to the shot file name (not use in this case) or list the variables below from the shot file using the same names
+#shot_file_name					__test01.shot
+
 # if the bean weight (in grams) is not saved in the shot file, save it here
 dsv2_bean_weight				18.0
 
 measured_tds					20.0
 
-shot_file_name					__test01.shot
-
+# example with 1 g per sec and 30 sec shot
+espresso_elapsed                {0.0 30}
+espresso_weight                 {0.0 30}
 
 
 # modelling parameteres
