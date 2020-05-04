@@ -1,12 +1,3 @@
-puck_diameter_mm				58.5
-grounds_density_kg_m3			330
-
-# this is related to fi_h (h-phase) volume fraction, as per Morony or Hendon table S1
-grounds_volume_fraction			0.8272
-
-# this is volume fraction of void space in a coffee particle, fi_v as per Morony
-void_in_grounds_volume_fraction	0.644
-
 # assumption used in Moroney and Hendon that about 30% of total bean mass is soluble
 soluble_coffee_mass_fraction	0.3
 
@@ -16,12 +7,24 @@ coffee_cell_size_mm				0.03
 # ground particle size distributution, % by volume of particles with 0 (==fines), 1, 2, etc num cell rings
 #
 # % fines
-particle_size_distributution_0  0.15
+particle_size_distributution_0	0.15
 #
-# % particles with 3 cell rings, i.e. 1 cell in the middle + 2 cell rings => 1*0.3 + 2*(2*0.3) = 0.15 mm diameter
-particle_size_distributution_3  0.85
-#particle_size_distributution_3  0.75
-#particle_size_distributution_4  0.10
+# % particles with 4 cell rings, i.e. 1 cell in the middle + 3 cell rings => 1*0.3 + 2*(3*0.3) = 0.21 mm diameter
+particle_size_distributution_4	0.85
+#
+# % particles with 5 cell rings, i.e. 1 cell in the middle + 4 cell rings => 1*0.3 + 2*(3*0.3) = 0.27 mm diameter
+#particle_size_distributution_5	0.10
+
+# dry coffee grounds and water density
+grounds_density_kg_m3			330
+water_density_kg_m3			    997
+
+# this is related to fi_h (h-phase) volume fraction, as per Morony or Hendon table S1
+grounds_volume_fraction			0.8272
+
+# this is volume fraction of void space in a coffee particle, fi_v as per Morony
+void_in_grounds_volume_fraction	0.644
+
 
 # refer to the shot file name (not use in this case) or list the variables below from the shot file using the same names
 #shot_file_name					__test01.shot
@@ -35,12 +38,11 @@ measured_tds					20.0
 espresso_elapsed                {0.0 30}
 espresso_weight                 {0.0 30}
 
-
 # modelling parameteres
-modelling_time_step_sec			1
+modelling_time_step_sec			0.1
 modelling_print_step_sec		2
 modelling_total_time_sec		20
-num_modelling_layers_in_puck    1
+num_modelling_slices_in_puck    1
 k_the_coefficient               0.4
 
 # modelling_mode: select from "calibrate" and "simulate"

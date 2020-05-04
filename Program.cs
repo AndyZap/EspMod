@@ -7,7 +7,7 @@ namespace EspMod
 {
     class Program
     {
-        static string Revision = "Espresso extraction model v1.8";
+        static string Revision = "Espresso extraction model v1.9";
 
         public class Cell
         {
@@ -130,25 +130,25 @@ namespace EspMod
             }
         }
 
-        public class Layer
+        public class Slices
         {
             //public int num;
             public Dictionary<int, Grain> grains = new Dictionary<int, Grain>();
 
-            public double layer_volume_mm3;
+            public double slice_volume_mm3;
             public double grounds_volume_mm3;
             public double void_volume_mm3;
             public double mass_g;
             public double delta_mass_g;
 
-            public Layer()
+            public Slices()
             {
             }
 
             public void Print(Log log, int index)
             {
                 var void_tds = 1E5 * mass_g / void_volume_mm3;
-                log.Write("Puck layer=" + index.ToString() + "                            TDS=" + void_tds.ToString("0.00").PadLeft(6));
+                log.Write("Puck slice=" + (index+1).ToString() + "                            TDS=" + void_tds.ToString("0.00").PadLeft(6));
                 foreach (int key in grains.Keys)
                     grains[key].Print(log, key);
 
@@ -182,7 +182,7 @@ namespace EspMod
             Log    log;
             public bool has_errors = false;
 
-            List<Layer> layers = new List<Layer>();
+            List<Slices> slices = new List<Slices>();
 
             double volume_in_cup_mm3                    = 0.0;
             double mass_in_cup_g                        = 0.0;
@@ -190,11 +190,10 @@ namespace EspMod
             double modelling_time_step_sec              = 1;
             double modelling_print_step_sec             = 2;
             double modelling_total_time_sec             = 2;
-            int    num_modelling_layers_in_puck         = 10;
+            int    num_modelling_slices_in_puck         = 10;
 
-
-            double puck_diameter_mm                     = 58.5;
             double grounds_density_kg_m3                = 330;
+            double water_density_kg_m3                  = 997;
 
             double soluble_coffee_mass_fraction         = 0.3;
             double coffee_cell_size_mm                  = 0.03;
@@ -210,10 +209,10 @@ namespace EspMod
                 modelling_time_step_sec                 = config.GetDouble("modelling_time_step_sec");          if (!Check(modelling_time_step_sec)) return;
                 modelling_print_step_sec                = config.GetDouble("modelling_print_step_sec");         if (!Check(modelling_print_step_sec)) return;
                 modelling_total_time_sec                = config.GetInt("modelling_total_time_sec");            if (!Check(modelling_total_time_sec)) return;
-                num_modelling_layers_in_puck            = config.GetInt("num_modelling_layers_in_puck");        if (!Check(num_modelling_layers_in_puck)) return;
+                num_modelling_slices_in_puck            = config.GetInt("num_modelling_slices_in_puck");        if (!Check(num_modelling_slices_in_puck)) return;
 
-                puck_diameter_mm                        = config.GetDouble("puck_diameter_mm");                 if (!Check(puck_diameter_mm)) return;
                 grounds_density_kg_m3                   = config.GetDouble("grounds_density_kg_m3");            if (!Check(grounds_density_kg_m3)) return;
+                water_density_kg_m3                     = config.GetDouble("water_density_kg_m3");              if (!Check(water_density_kg_m3)) return;
 
                 soluble_coffee_mass_fraction            = config.GetDouble("soluble_coffee_mass_fraction");     if (!Check(soluble_coffee_mass_fraction)) return;
                 coffee_cell_size_mm                     = config.GetDouble("coffee_cell_size_mm");              if (!Check(coffee_cell_size_mm)) return;
@@ -244,12 +243,9 @@ namespace EspMod
 
 
                 // calculate the basic vars
-                double puck_area_mm2            = Math.PI * puck_diameter_mm * puck_diameter_mm * 0.25;
                 double grounds_density_g_mm3    = grounds_density_kg_m3 * 1E3 * 1E-9;
                 double puck_volume_mm3          = dsv2_bean_weight / grounds_density_g_mm3;
-                double puck_height_mm           = puck_volume_mm3 / puck_area_mm2;
-                double soluble_mass_per_layer   = dsv2_bean_weight * soluble_coffee_mass_fraction / num_modelling_layers_in_puck;
-                log.Write("puck_height_mm " + puck_height_mm.ToString("0.000"));
+                double soluble_mass_per_layer   = dsv2_bean_weight * soluble_coffee_mass_fraction / num_modelling_slices_in_puck;
 
 
                 // setting up static vars for Cell. Assume cells are little cubes when calculating the volume
@@ -258,15 +254,15 @@ namespace EspMod
                 Cell.void_volume_mm3 = Cell.volume_mm3 * void_in_grounds_volume_fraction;
 
                 // setting up layers
-                for (int i = 0; i < num_modelling_layers_in_puck; i++)
+                for (int i = 0; i < num_modelling_slices_in_puck; i++)
                 {
-                    Layer layer = new Layer
+                    Slices layer = new Slices
                     {
-                        layer_volume_mm3 = puck_volume_mm3 / num_modelling_layers_in_puck
+                        slice_volume_mm3 = puck_volume_mm3 / num_modelling_slices_in_puck
                     };
 
-                    layer.grounds_volume_mm3 = layer.layer_volume_mm3 * grounds_volume_fraction;
-                    layer.void_volume_mm3 = layer.layer_volume_mm3 * (1.0 - grounds_volume_fraction);
+                    layer.grounds_volume_mm3 = layer.slice_volume_mm3 * grounds_volume_fraction;
+                    layer.void_volume_mm3 = layer.slice_volume_mm3 * (1.0 - grounds_volume_fraction);
 
                     foreach(int key in psd.Keys)
                     {
@@ -309,7 +305,7 @@ namespace EspMod
                         }
                     }
 
-                    layers.Add(layer);
+                    slices.Add(layer);
                 }
              }                
 
@@ -339,18 +335,18 @@ namespace EspMod
                 log.Write("Time=" + timestamp.ToString("0.00") + " sec");
                 log.Write("");
 
-                if (layers.Count == 1)
-                    layers[0].Print(log, 0);
-                else if (layers.Count == 2)
+                if (slices.Count == 1)
+                    slices[0].Print(log, 0);
+                else if (slices.Count == 2)
                 {
-                    layers[0].Print(log, 0);
-                    layers[1].Print(log, 1);
+                    slices[0].Print(log, 0);
+                    slices[1].Print(log, 1);
                 }
-                else if (layers.Count > 2)
+                else if (slices.Count > 2)
                 {
-                    layers[0].Print(log, 0);
-                    layers[layers.Count / 2].Print(log, layers.Count / 2);
-                    layers[layers.Count - 1].Print(log, layers.Count - 1);
+                    slices[0].Print(log, 0);
+                    slices[slices.Count / 2].Print(log, slices.Count / 2);
+                    slices[slices.Count - 1].Print(log, slices.Count - 1);
                 }
 
                 var tds = volume_in_cup_mm3 == 0 ? 0.0 : 1E5 * mass_in_cup_g / volume_in_cup_mm3;
@@ -370,7 +366,7 @@ namespace EspMod
                 Cell.Kstar_the_coefficient = k_the_coefficient * Cell.void_volume_mm3;
                 Cell.modelling_time_step_sec = modelling_time_step_sec;
 
-                if(fresh_water_mm3 > layers[0].void_volume_mm3 * 0.3)
+                if(fresh_water_mm3 > slices[0].void_volume_mm3 * 0.3)
                 {
                     log.Write("ERROR: Please decrease the time step, fresh water takes more than 30% of the layer volume");
                     has_errors = true;
@@ -383,18 +379,18 @@ namespace EspMod
                     timestamp += modelling_time_step_sec;
 
                     // diffusion from grains
-                    foreach (Layer layer in layers)
+                    foreach (Slices layer in slices)
                         layer.SimulateGrainIntoVoidDiffusion();
 
                     // flow of the fresh water
-                    var layer_0 = layers[0];
+                    var layer_0 = slices[0];
 
                     var prev_delta_layer_mass_g = layer_0.mass_g * (fresh_water_mm3 / layer_0.void_volume_mm3);
                     layer_0.delta_mass_g -= prev_delta_layer_mass_g;
 
-                    for (int i = 1; i < layers.Count; i++)
+                    for (int i = 1; i < slices.Count; i++)
                     {
-                        var layer_i = layers[i];
+                        var layer_i = slices[i];
                         var current_delta_layer_mass_g = layer_i.mass_g * (fresh_water_mm3 / layer_i.void_volume_mm3);
 
                         layer_i.delta_mass_g += prev_delta_layer_mass_g;
@@ -409,9 +405,9 @@ namespace EspMod
                     
 
                     // update mass values
-                    for (int i = 0; i < layers.Count; i++)
+                    for (int i = 0; i < slices.Count; i++)
                     {
-                        var layer_i = layers[i];
+                        var layer_i = slices[i];
                         layer_i.mass_g += layer_i.delta_mass_g;
 
                         foreach(int key in layer_i.grains.Keys)
