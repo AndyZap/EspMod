@@ -7,7 +7,7 @@ namespace EspMod
 {
     class Program
     {
-        static string Revision = "Espresso extraction model v1.10";
+        static string Revision = "Espresso extraction model v1.11";
 
         public class Cell
         {
@@ -33,15 +33,11 @@ namespace EspMod
             public double[] delta_mass_g;
             public double[] cell_count_coeff;
 
-            public double total_volume_of_these_particles_mm3;
-            public double total_soluble_mass_in_these_particles_g;
-
             public double diameter_of_one_particle_mm;
             public double volume_of_one_particle_mm3;
-            public double soluble_mass_in_one_particle_g;
             public double num_of_these_particles;
 
-            public Particle(int level)
+            public Particle(int level, double total_volume_of_these_particles_mm3)
             {
                 mass_g = new double[level];
                 delta_mass_g = new double[level];
@@ -77,16 +73,6 @@ namespace EspMod
                 for (int i = 1; i < level; i++)
                     cell_count_coeff[i] = cells[i - 1].num_of_these_cells / cells[i].num_of_these_cells;
             }
-
-            public double GetTotalNumCells()
-            {
-                double output = 0;
-                foreach(var cell in cells)
-                {
-                    output += cell.num_of_these_cells;
-                }
-                return output;
-            }
             public void SetInitalMassPerCell(double mass)
             {
                 for (int i = 0; i < cells.Count; i++)
@@ -96,12 +82,26 @@ namespace EspMod
             public void Print(Log log, int index)
             {
                 StringBuilder sb = new StringBuilder();
-                sb.Append("   Particles with " + index.ToString() + " cell layers; Per layer TDS=");
+                sb.Append("   Particles with " + index.ToString() + " cell layers; Per layer Concentration=");
                 for(int i = cells.Count-1; i>=0; i--)
                 {
-                    var tds = 1E5 * mass_g[i] / Cell.void_volume_mm3;
-                    sb.Append(tds.ToString("0.00").PadLeft(6));
+                    var concentration_kg_m3 = 1E6 * mass_g[i] / Cell.void_volume_mm3;
+                    sb.Append(concentration_kg_m3.ToString("0").PadLeft(4));
                     if(i != 0)
+                        sb.Append(", ");
+                }
+                log.Write(sb.ToString());
+            }
+
+            public void PrintMass(Log log, int index, double inital_total_mass)
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.Append("   Particles with " + index.ToString() + " cell layers; Per layer     % of mass=");
+                for (int i = cells.Count - 1; i >= 0; i--)
+                {
+                    var percent_mass = 1E2 * mass_g[i] * num_of_these_particles * cells[i].num_of_these_cells / inital_total_mass;
+                    sb.Append(percent_mass.ToString("0").PadLeft(4));
+                    if (i != 0)
                         sb.Append(", ");
                 }
                 log.Write(sb.ToString());
@@ -130,26 +130,36 @@ namespace EspMod
             }
         }
 
-        public class Slices
+        public class Slice
         {
             public Dictionary<int, Particle> particles = new Dictionary<int, Particle>();
 
-            public double slice_volume_mm3;
-            public double particles_volume_mm3;
-            public double void_volume_mm3;
-            public double mass_g;
+            public double volume_between_particles_mm3;
+            public double mass_between_particles_g;
             public double delta_mass_g;
+            public double inital_soluble_mass_per_layer;
 
-            public Slices()
+            public Slice()
             {
             }
 
             public void Print(Log log, int index)
             {
-                var void_tds = 1E5 * mass_g / void_volume_mm3;
-                log.Write("Puck slice=" + (index+1).ToString() + "                            TDS=" + void_tds.ToString("0.00").PadLeft(6));
+                var void_concentration_kg_m3 = 1E6 * mass_between_particles_g / volume_between_particles_mm3;
+                var percent_mass = 1E2 * mass_between_particles_g / inital_soluble_mass_per_layer;
+                log.Write("Puck slice=" + (index+1).ToString().PadLeft(3) + 
+                          "                             Concentration=" + void_concentration_kg_m3.ToString("0").PadLeft(4));
+
                 foreach (int key in particles.Keys)
                     particles[key].Print(log, key);
+
+                log.Write("");
+
+                log.Write("              " +
+                          "                                 % of mass=" + percent_mass.ToString("0").PadLeft(4));
+
+                foreach (int key in particles.Keys)
+                    particles[key].PrintMass(log, key, inital_soluble_mass_per_layer);
 
                 log.Write("");
             }
@@ -167,7 +177,7 @@ namespace EspMod
                     // outer cell to void transfer
                     var outer_cell_index = particle.cells.Count - 1;
                     var delta_m_out = Cell.Kstar_the_coefficient * Cell.modelling_time_step_sec *
-                        (particle.mass_g[outer_cell_index] / Cell.void_volume_mm3 - mass_g / void_volume_mm3);
+                        (particle.mass_g[outer_cell_index] / Cell.void_volume_mm3 - mass_between_particles_g / volume_between_particles_mm3);
 
                     particle.delta_mass_g[outer_cell_index] -= delta_m_out;
 
@@ -181,7 +191,7 @@ namespace EspMod
             Log    log;
             public bool has_errors = false;
 
-            List<Slices> slices = new List<Slices>();
+            List<Slice> slices = new List<Slice>();
 
             double volume_in_cup_mm3                    = 0.0;
             double mass_in_cup_g                        = 0.0;
@@ -197,7 +207,7 @@ namespace EspMod
             double soluble_coffee_mass_fraction         = 0.3;
             double coffee_cell_size_mm                  = 0.03;
 
-            double dsv2_bean_weight                     = 18.0;
+            double bean_weight_g                        = 18.0;
 
             public Puck(Config config, Log log_)
             {
@@ -216,38 +226,50 @@ namespace EspMod
                 soluble_coffee_mass_fraction            = config.GetDouble("soluble_coffee_mass_fraction");     if (!Check(soluble_coffee_mass_fraction)) return;
                 coffee_cell_size_mm                     = config.GetDouble("coffee_cell_size_mm");              if (!Check(coffee_cell_size_mm)) return;
 
-                dsv2_bean_weight                        = config.GetDouble("dsv2_bean_weight");                 if (!Check(dsv2_bean_weight)) return;
+                bean_weight_g                           = config.GetDouble("dsv2_bean_weight");                 if (!Check(bean_weight_g)) return;
 
                 double grounds_volume_fraction          = config.GetDouble("grounds_volume_fraction");          if (!Check(grounds_volume_fraction)) return;
                 double void_in_grounds_volume_fraction  = config.GetDouble("void_in_grounds_volume_fraction");  if (!Check(void_in_grounds_volume_fraction)) return;
 
                 // load PSD
                 Dictionary<int, double> psd = new Dictionary<int, double>();
-                double total = 0.0;
+                double                  psd0 = 0;
+                double                  total_non_fines = 0;
                 for (int i = 0; i < 100; i++) // support up to 100 layers
                 {
                     if (config.HasKey("particle_size_distributution_" + i.ToString(), print_error: false))
                     {
                         var psd_value = config.GetDouble("particle_size_distributution_" + i.ToString()); if (!Check(psd_value)) return;
 
-                        psd[i] = psd_value;
-                        total += psd_value;
+                        if (i == 0)
+                            psd0 = psd_value;
+                        else
+                        {
+                            psd[i] = psd_value;
+                            total_non_fines += psd_value;
+                        }
                     }
                 }
-                if(Math.Abs(total-1) > 1E-3)
+                if(Math.Abs(total_non_fines + psd0 - 1) > 1E-3)
                 {
                     log.Write("ERROR: sum of the PSD values had to be 1");
+                    has_errors = true;
+                    return;
+                }
+                if (Math.Abs(psd0 - 1) < 1E-3)
+                {
+                    log.Write("ERROR: PSD contains fines only, please add at least one particle size");
+                    has_errors = true;
                     return;
                 }
 
 
                 // calculate the basic vars
-                double grounds_density_g_mm3    = grounds_density_kg_m3 * 1E3 * 1E-9;
-                double puck_volume_mm3          = dsv2_bean_weight / grounds_density_g_mm3;
-                double soluble_mass_per_layer   = dsv2_bean_weight * soluble_coffee_mass_fraction / num_modelling_slices_in_puck;
+                double grounds_density_g_mm3    = grounds_density_kg_m3 * 1E-6;
+                double puck_volume_mm3          = bean_weight_g / grounds_density_g_mm3;
+                double soluble_mass_per_layer   = bean_weight_g * soluble_coffee_mass_fraction / num_modelling_slices_in_puck;
 
-
-                // setting up static vars for Cell. Assume cells are little cubes when calculating the volume
+                // setting up static vars for Cell. Assume cells are little spheres when calculating the volume
                 Cell.size_mm = coffee_cell_size_mm;
                 Cell.volume_mm3 = Math.PI * coffee_cell_size_mm * coffee_cell_size_mm * coffee_cell_size_mm / 6;
                 Cell.void_volume_mm3 = Cell.volume_mm3 * void_in_grounds_volume_fraction;
@@ -255,56 +277,31 @@ namespace EspMod
                 // setting up layers
                 for (int i = 0; i < num_modelling_slices_in_puck; i++)
                 {
-                    Slices layer = new Slices
+                    Slice slice = new Slice();
+
+                    double slice_volume_mm3 = puck_volume_mm3 / num_modelling_slices_in_puck;
+                    double particles_volume_mm3 = slice_volume_mm3 * grounds_volume_fraction;
+
+                    slice.volume_between_particles_mm3 = slice_volume_mm3 * (1.0 - grounds_volume_fraction);
+                    slice.mass_between_particles_g = soluble_mass_per_layer * psd0;
+                    slice.inital_soluble_mass_per_layer = soluble_mass_per_layer;
+
+                    double mass_in_particles_g = soluble_mass_per_layer * (1 - psd0);
+                    double num_of_cells_per_layer = particles_volume_mm3 / Cell.volume_mm3;
+                    double mass_per_cell = mass_in_particles_g / num_of_cells_per_layer;
+
+                    foreach (int key in psd.Keys)
                     {
-                        slice_volume_mm3 = puck_volume_mm3 / num_modelling_slices_in_puck
-                    };
+                        // careful with using PSD fractions in the next line - we take fraction of non-fines
+                        double total_volume_of_these_particles_mm3 = particles_volume_mm3 * (psd[key] / total_non_fines);
 
-                    layer.particles_volume_mm3 = layer.slice_volume_mm3 * grounds_volume_fraction;
-                    layer.void_volume_mm3 = layer.slice_volume_mm3 * (1.0 - grounds_volume_fraction);
+                        Particle g = new Particle(key, total_volume_of_these_particles_mm3);
+                        g.SetInitalMassPerCell(mass_per_cell);
 
-                    foreach(int key in psd.Keys)
-                    {
-                        if (key == 0)
-                        {
-                            layer.mass_g = soluble_mass_per_layer * psd[key];
-
-                            var initial_concentration_in_void = layer.mass_g / layer.void_volume_mm3;
-                            if(i == 0)
-                                log.Write("initial_concentration between grains " + initial_concentration_in_void.ToString("0.0000000"));
-
-                            //initial_concentration between grains 8.59375E-05
-                            //0.08E-3 g per 1E-3 g(this is 1 mm3 weight) => 8 % TDS in the void.Looks correct.
-                        }
-                        else
-                        {
-                            Particle g = new Particle(key);
-                            g.total_volume_of_these_particles_mm3 = layer.particles_volume_mm3 * psd[key];
-                            g.total_soluble_mass_in_these_particles_g = soluble_mass_per_layer * psd[key];
-                            g.num_of_these_particles = g.total_volume_of_these_particles_mm3 / g.volume_of_one_particle_mm3;
-                            g.soluble_mass_in_one_particle_g = g.total_soluble_mass_in_these_particles_g / g.num_of_these_particles;
-
-                            double mass_per_cell = g.soluble_mass_in_one_particle_g / g.GetTotalNumCells();
-                            g.SetInitalMassPerCell(mass_per_cell);
-
-                            // checks!
-                            var initial_concentration = g.total_soluble_mass_in_these_particles_g / 
-                                (g.total_volume_of_these_particles_mm3 * void_in_grounds_volume_fraction);
-                            if (i == 0)
-                                log.Write("initial_concentration inside grain   " + initial_concentration.ToString("0.0000000"));
-
-                            initial_concentration = mass_per_cell / Cell.void_volume_mm3;
-                            if (i == 0)
-                                log.Write("initial_concentration inside g_alt   " + initial_concentration.ToString("0.0000000"));
-
-                            //initial_concentration 0.000185839830844456
-                            //good: 185 kg/m3 => TDS 18.5% in cells
-
-                            layer.particles[key] = g;
-                        }
+                        slice.particles[key] = g;
                     }
 
-                    slices.Add(layer);
+                    slices.Add(slice);
                 }
              }                
 
@@ -348,11 +345,11 @@ namespace EspMod
                     slices[slices.Count - 1].Print(log, slices.Count - 1);
                 }
 
-                var tds = volume_in_cup_mm3 == 0 ? 0.0 : 1E5 * mass_in_cup_g / volume_in_cup_mm3;
-                var ey = 100.0 * mass_in_cup_g / dsv2_bean_weight;
-                log.Write("In the cup: Volume_ml=" + (1E-3* volume_in_cup_mm3).ToString("0.000") +
+                var concentration = volume_in_cup_mm3 == 0 ? 0.0 : 1E6 * mass_in_cup_g / volume_in_cup_mm3;
+                var ey = 100.0 * mass_in_cup_g / bean_weight_g;
+                log.Write("In the cup: Volume_mL=" + (1E-3* volume_in_cup_mm3).ToString("0.0") +
                           " Mass_g=" + mass_in_cup_g.ToString("0.00") +
-                          " TDS%=" + tds.ToString("0.00") + 
+                          " Concentration=" + concentration.ToString("0") + 
                           " EY%=" + ey.ToString("0.0"));
             }
 
@@ -365,7 +362,7 @@ namespace EspMod
                 Cell.Kstar_the_coefficient = k_the_coefficient * Cell.void_volume_mm3;
                 Cell.modelling_time_step_sec = modelling_time_step_sec;
 
-                if(fresh_water_mm3 > slices[0].void_volume_mm3 * 0.3)
+                if(fresh_water_mm3 > slices[0].volume_between_particles_mm3 * 0.3)
                 {
                     log.Write("ERROR: Please decrease the time step, fresh water takes more than 30% of the layer volume");
                     has_errors = true;
@@ -378,19 +375,19 @@ namespace EspMod
                     timestamp += modelling_time_step_sec;
 
                     // diffusion from grains
-                    foreach (Slices layer in slices)
+                    foreach (Slice layer in slices)
                         layer.SimulateParticleIntoVoidDiffusion();
 
                     // flow of the fresh water
                     var layer_0 = slices[0];
 
-                    var prev_delta_layer_mass_g = layer_0.mass_g * (fresh_water_mm3 / layer_0.void_volume_mm3);
+                    var prev_delta_layer_mass_g = layer_0.mass_between_particles_g * (fresh_water_mm3 / layer_0.volume_between_particles_mm3);
                     layer_0.delta_mass_g -= prev_delta_layer_mass_g;
 
                     for (int i = 1; i < slices.Count; i++)
                     {
                         var layer_i = slices[i];
-                        var current_delta_layer_mass_g = layer_i.mass_g * (fresh_water_mm3 / layer_i.void_volume_mm3);
+                        var current_delta_layer_mass_g = layer_i.mass_between_particles_g * (fresh_water_mm3 / layer_i.volume_between_particles_mm3);
 
                         layer_i.delta_mass_g += prev_delta_layer_mass_g;
                         layer_i.delta_mass_g -= current_delta_layer_mass_g;
@@ -407,7 +404,7 @@ namespace EspMod
                     for (int i = 0; i < slices.Count; i++)
                     {
                         var layer_i = slices[i];
-                        layer_i.mass_g += layer_i.delta_mass_g;
+                        layer_i.mass_between_particles_g += layer_i.delta_mass_g;
 
                         foreach(int key in layer_i.particles.Keys)
                         {
@@ -550,13 +547,16 @@ namespace EspMod
                     return;
                 }
 
-                var shot_file_name = GetString("shot_file_name");
-                if(shot_file_name != "")
+                if (HasKey("shot_file_name", print_error: false))
                 {
-                    if (!LoadFile(shot_file_name))
+                    var shot_file_name = GetString("shot_file_name");
+                    if (shot_file_name != "")
                     {
-                        has_errors = true;
-                        return;
+                        if (!LoadFile(shot_file_name))
+                        {
+                            has_errors = true;
+                            return;
+                        }
                     }
                 }
             }
@@ -684,7 +684,6 @@ namespace EspMod
                 return;
 
             puck.Print(timestamp: 0.0);
-
 
             double k_the_coefficient = config.GetDouble("k_the_coefficient");
             if(k_the_coefficient == double.MinValue)
