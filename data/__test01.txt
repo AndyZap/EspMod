@@ -47,3 +47,5 @@ k_the_coefficient               0.4
 
 # modelling_mode: select from "calibrate" and "simulate"
 modelling_mode					simulate
+
+wait_for_keystroke				0

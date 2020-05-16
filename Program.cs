@@ -7,56 +7,59 @@ namespace EspMod
 {
     class Program
     {
-        static string Revision = "Espresso extraction model v1.14";
+        static string Revision = "Espresso extraction model v1.15";
 
-        public class Cell
+        public static  class Cell
         {
             public static double size_mm;
             public static double volume_mm3;
             public static double void_volume_mm3;
+        }
 
-            public double        num_of_these_cells;
+        public class CellLayer
+        {
+            public double num_cells;
 
-            public Cell(double n)
+            public CellLayer(double n)
             {
-                num_of_these_cells = n;
+                num_cells = n;
             }
         }
 
         public class Particle
         {
-            public List<Cell> cells = new List<Cell>();
+            public List<CellLayer> cell_layers = new List<CellLayer>();
 
             public double[] cell_count_ratio;
 
             public double num_of_these_particles;
 
-            public Particle(int level, double total_volume_of_these_particles_mm3)
+            public Particle(int num_layers, double total_volume_of_these_particles_mm3)
             {
-                cell_count_ratio = new double[level];
+                cell_count_ratio = new double[num_layers];
 
                 // for the calc we assume one center cell is surrounded by layers of cells
                 double num_cell_at_prev_size = 0;
-                for (int i = 0; i < level; i++)
+                for (int i = 0; i < num_layers; i++)
                 {
                     // calc per layer
                     var particle_diam = Cell.size_mm + Cell.size_mm * 2 * i;
                     var particle_vol = Math.PI * particle_diam * particle_diam * particle_diam / 6;
                     var num_cells_per_particle = particle_vol / Cell.volume_mm3;
 
-                    var num_cells_per_level = num_cells_per_particle - num_cell_at_prev_size;
+                    var num_cells_per_layer = num_cells_per_particle - num_cell_at_prev_size;
 
-                    cells.Add(new Cell(num_cells_per_level));
+                    cell_layers.Add(new CellLayer(num_cells_per_layer));
 
                     num_cell_at_prev_size = num_cells_per_particle;
 
-                    if(i == level-1)
+                    if(i == num_layers-1)
                         num_of_these_particles = total_volume_of_these_particles_mm3 / particle_vol;
                 }
 
                 cell_count_ratio[0] = 1.0;
-                for (int i = 1; i < level; i++)
-                    cell_count_ratio[i] = cells[i - 1].num_of_these_cells / cells[i].num_of_these_cells;
+                for (int i = 1; i < num_layers; i++)
+                    cell_count_ratio[i] = cell_layers[i - 1].num_cells / cell_layers[i].num_cells;
             }
         }
 
@@ -90,7 +93,7 @@ namespace EspMod
             public double[][][] delta_mass_g;
 
             public double[] mass_btw_g;
-            public double[] delta_btw_mass_g;
+            public double[] delta_mass_btw_g;
 
             public double volume_between_particles_mm3;
             public double inital_soluble_mass_per_slice;
@@ -200,7 +203,7 @@ namespace EspMod
 
                     for (int i_particle = 0; i_particle < num_particle_sizes; i_particle++)
                     {
-                        int num_layers = particles[i_particle].cells.Count;
+                        int num_layers = particles[i_particle].cell_layers.Count;
                         mass_g[i_slice][i_particle] = new double[num_layers];
                         delta_mass_g[i_slice][i_particle] = new double[num_layers];
                         cell_count_ratio[i_particle] = new double[num_layers];
@@ -216,16 +219,16 @@ namespace EspMod
                             cell_count_ratio[i_particle][i_layer] = particles[i_particle].cell_count_ratio[i_layer];
                         }
 
-                        num_cells_in_outer_layer[i_particle] = particles[i_particle].num_of_these_particles * particles[i_particle].cells[num_layers-1].num_of_these_cells;
+                        num_cells_in_outer_layer[i_particle] = particles[i_particle].num_of_these_particles * particles[i_particle].cell_layers[num_layers-1].num_cells;
                     }
                 }
 
                 mass_btw_g = new double[num_modelling_slices_in_puck];
-                delta_btw_mass_g = new double[num_modelling_slices_in_puck];
+                delta_mass_btw_g = new double[num_modelling_slices_in_puck];
                 for (int i_slice = 0; i_slice < num_modelling_slices_in_puck; i_slice++)
                 {
                     mass_btw_g[i_slice] = soluble_mass_per_slice * psd0;
-                    delta_btw_mass_g[i_slice] = 0;
+                    delta_mass_btw_g[i_slice] = 0;
                 }
             }
 
@@ -252,9 +255,9 @@ namespace EspMod
             {
                 StringBuilder sb = new StringBuilder();
 
-                int num_cells = particles[i_particle].cells.Count;
+                int num_cells = particles[i_particle].cell_layers.Count;
 
-                sb.Append("   Particles with " + num_cells.ToString() + " cell layers; Per layer Concentration=");
+                sb.Append("   Particles with " + num_cells.ToString() + " cell layers; Per layer     Concent_kg_m3=");
                 for (int i_layer = num_cells - 1; i_layer >= 0; i_layer--)
                 {
                     var concentration_kg_m3 = 1E6 * mass_g[i_slice][i_particle][i_layer] / Cell.void_volume_mm3;
@@ -264,39 +267,49 @@ namespace EspMod
                 }
                 log.Write(sb.ToString());
             }
-            public void PrintParticleMass(int i_slice, int i_particle, double inital_total_mass)
+            public double PrintParticleMass(int i_slice, int i_particle)
             {
                 StringBuilder sb = new StringBuilder();
 
-                int num_cells = particles[i_particle].cells.Count;
+                int num_cells = particles[i_particle].cell_layers.Count;
 
-                sb.Append("   Particles with " + num_cells.ToString() + " cell layers; Per layer     % of mass=");
+                double sum_top_two = 0;
+
+                sb.Append("   Particles with " + num_cells.ToString() + " cell layers; Per layer % of initial mass=");
                 for (int i_layer = num_cells - 1; i_layer >= 0; i_layer--)
                 {
-                    var percent_mass = 1E2 * mass_g[i_slice][i_particle][i_layer] * particles[i_particle].num_of_these_particles * particles[i_particle].cells[i_layer].num_of_these_cells / inital_total_mass;
+                    var percent_mass = 1E2 * mass_g[i_slice][i_particle][i_layer] 
+                                        * particles[i_particle].num_of_these_particles * particles[i_particle].cell_layers[i_layer].num_cells 
+                                        / inital_soluble_mass_per_slice;
                     sb.Append(percent_mass.ToString("0").PadLeft(4));
                     if (i_layer != 0)
                         sb.Append(", ");
+
+                    if (i_layer == num_cells - 1 || i_layer == num_cells - 2)
+                        sum_top_two += percent_mass;
                 }
                 log.Write(sb.ToString());
+
+                return sum_top_two;
             }
             public void PrintSlice(int i_slice)
             {
                 var void_concentration_kg_m3 = 1E6 * mass_btw_g[i_slice] / volume_between_particles_mm3;
                 var percent_mass = 1E2 * mass_btw_g[i_slice] / inital_soluble_mass_per_slice;
                 log.Write("Puck slice=" + (i_slice + 1).ToString().PadLeft(3) +
-                            "                             Concentration=" + void_concentration_kg_m3.ToString("0").PadLeft(4));
+                            "                   Between       Concent_kg_m3=" + void_concentration_kg_m3.ToString("0").PadLeft(4));
 
                 for (int i_particle = 0; i_particle < particles.Count; i_particle++)
                     PrintParticle(i_slice, i_particle);
 
-                log.Write("");
-
                 log.Write("              " +
-                            "                                 % of mass=" + percent_mass.ToString("0").PadLeft(4));
+                            "                   Between   % of initial mass=" + percent_mass.ToString("0").PadLeft(4));
 
+                double sum_top_two = 0;
                 for (int i_particle = 0; i_particle < particles.Count; i_particle++)
-                    PrintParticleMass(i_slice, i_particle, inital_soluble_mass_per_slice);
+                    sum_top_two += PrintParticleMass(i_slice, i_particle);
+
+                log.Write("    Top two layers, sum over all particles % of initial mass=" + sum_top_two.ToString("0").PadLeft(4));
 
                 log.Write("");
             }
@@ -305,6 +318,11 @@ namespace EspMod
                 log.Write("");
                 log.Write("-------------------------------------------------------------------------------");
                 log.Write("Time=" + timestamp.ToString("0.00") + " sec");
+
+                log.Write("");
+                log.Write("Initial soluble mass per slice= " + inital_soluble_mass_per_slice.ToString("0.00").PadLeft(3) +
+                          " g. The percentage of the initial mass below is given relative to this value");
+
                 log.Write("");
 
                 if (num_modelling_slices_in_puck == 1)
@@ -324,8 +342,8 @@ namespace EspMod
                 var concentration = volume_in_cup_mm3 == 0 ? 0.0 : 1E6 * mass_in_cup_g / volume_in_cup_mm3;
                 var ey = 100.0 * mass_in_cup_g / bean_weight_g;
                 log.Write("In the cup: Volume_mL=" + (1E-3* volume_in_cup_mm3).ToString("0.0") +
-                          " Mass_g=" + mass_in_cup_g.ToString("0.00") +
-                          " Concentration=" + concentration.ToString("0") + 
+                          " Coffee_mass_g=" + mass_in_cup_g.ToString("0.00") +
+                          " Concent_kg_m3=" + concentration.ToString("0") + 
                           " EY%=" + ey.ToString("0.0"));
             }
 
@@ -336,7 +354,7 @@ namespace EspMod
 
                 for (int i_particle = 0; i_particle < particles.Count; i_particle++)
                 {
-                    int num_layers = particles[i_particle].cells.Count;
+                    int num_layers = particles[i_particle].cell_layers.Count;
 
                     var m = mass_g[i_slice][i_particle];
                     var dm = delta_mass_g[i_slice][i_particle];
@@ -354,7 +372,7 @@ namespace EspMod
 
                     dm[num_layers - 1] -= delta_m_out;
 
-                    delta_btw_mass_g[i_slice] += delta_m_out * num_cells_in_outer_layer[i_particle];
+                    delta_mass_btw_g[i_slice] += delta_m_out * num_cells_in_outer_layer[i_particle];
                 }
             }
 
@@ -384,14 +402,14 @@ namespace EspMod
 
                     // flow of the fresh water
                     var prev_delta_layer_mass_g = mass_btw_g[0] * (fresh_water_mm3 / volume_between_particles_mm3);
-                    delta_btw_mass_g[0] -= prev_delta_layer_mass_g;
+                    delta_mass_btw_g[0] -= prev_delta_layer_mass_g;
 
                     for (int i = 1; i < num_modelling_slices_in_puck; i++)
                     {
                         var current_delta_layer_mass_g = mass_btw_g[i] * (fresh_water_mm3 / volume_between_particles_mm3);
 
-                        delta_btw_mass_g[i] += prev_delta_layer_mass_g;
-                        delta_btw_mass_g[i] -= current_delta_layer_mass_g;
+                        delta_mass_btw_g[i] += prev_delta_layer_mass_g;
+                        delta_mass_btw_g[i] -= current_delta_layer_mass_g;
 
                         prev_delta_layer_mass_g = current_delta_layer_mass_g;
                     }
@@ -399,17 +417,24 @@ namespace EspMod
                     // update in the cup values
                     volume_in_cup_mm3 += fresh_water_mm3;
                     mass_in_cup_g += prev_delta_layer_mass_g;
-                    
 
-                    // update mass values
+                    // Print
+                    if ((timestamp - last_print_time + 0.001) > modelling_print_step_sec) // bump the time delta for robust interval comparison
+                    {
+                        if (print_to_log)
+                            Print(timestamp);
+                        last_print_time = timestamp;
+                    }
+
+                    // Finally update mass values for the next step
                     for (int i_slice = 0; i_slice < num_modelling_slices_in_puck; i_slice++)
                     {
-                        mass_btw_g[i_slice] += delta_btw_mass_g[i_slice];
-                        delta_btw_mass_g[i_slice] = 0;
+                        mass_btw_g[i_slice] += delta_mass_btw_g[i_slice];
+                        delta_mass_btw_g[i_slice] = 0;
 
                         for (int i_particle = 0; i_particle < particles.Count; i_particle++)
                         {
-                            int num_layers = particles[i_particle].cells.Count;
+                            int num_layers = particles[i_particle].cell_layers.Count;
 
                             var m = mass_g[i_slice][i_particle];
                             var dm = delta_mass_g[i_slice][i_particle];
@@ -420,13 +445,6 @@ namespace EspMod
                                 dm[i_layer] = 0;
                             }
                         }
-                    }
-
-                    if ((timestamp - last_print_time + 0.001) > modelling_print_step_sec) // bump the time delta for robust interval comparison
-                    {
-                        if(print_to_log)
-                            Print(timestamp);
-                        last_print_time = timestamp;
                     }
                 }
                 while (timestamp < modelling_total_time_sec);
@@ -550,6 +568,9 @@ namespace EspMod
             public Config(string fname, Log log_)
             {
                 log = log_;
+
+                // presets
+                settings["wait_for_keystroke"] = "1";
 
                 if (!LoadFile(fname))
                 {
@@ -722,8 +743,10 @@ namespace EspMod
 
             puck.Simulate(k_the_coefficient, print_to_log: true);
 
+            Console.WriteLine("");
             Console.WriteLine("Finished");
-            //WaitForKey();
+            if(config.GetString("wait_for_keystroke") == "1")
+                WaitForKey();
         }
     }
 }
