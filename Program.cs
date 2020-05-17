@@ -7,7 +7,7 @@ namespace EspMod
 {
     class Program
     {
-        static string Revision = "Espresso extraction model v1.16";
+        static string Revision = "Espresso extraction model v1.17";
 
         public static  class Cell
         {
@@ -73,6 +73,7 @@ namespace EspMod
 
             double volume_in_cup_mm3                    = 0.0;
             double mass_in_cup_g                        = 0.0;
+            double delta_mass_in_cup_g                  = 0.0;
 
             double modelling_time_step_sec              = 1;
             double modelling_print_step_sec             = 2;
@@ -95,7 +96,7 @@ namespace EspMod
             public double[] mass_btw_g;
             public double[] delta_mass_btw_g;
 
-            public double volume_between_particles_mm3;
+            public double volume_between_particles_per_slice_mm3;
             public double inital_soluble_mass_per_slice;
 
             public double[][] cell_count_ratio;
@@ -172,19 +173,19 @@ namespace EspMod
 
                 // setting up slice vars
                 double slice_volume_mm3 = puck_volume_mm3 / num_modelling_slices_in_puck;
-                double particles_volume_mm3 = slice_volume_mm3 * grounds_volume_fraction;
+                double particles_volume_per_slice_mm3 = slice_volume_mm3 * grounds_volume_fraction;
 
-                volume_between_particles_mm3 = slice_volume_mm3 * (1.0 - grounds_volume_fraction);
+                volume_between_particles_per_slice_mm3 = slice_volume_mm3 * (1.0 - grounds_volume_fraction);
                 inital_soluble_mass_per_slice = soluble_mass_per_slice;
 
-                double mass_in_particles_g = soluble_mass_per_slice * (1 - psd0);
-                double num_of_cells_per_slice = particles_volume_mm3 / Cell.volume_mm3;
-                double mass_per_cell = mass_in_particles_g / num_of_cells_per_slice;
+                double mass_in_particles_per_slice_g = soluble_mass_per_slice * (1 - psd0);
+                double num_of_cells_per_slice = particles_volume_per_slice_mm3 / Cell.volume_mm3;
+                double mass_per_cell = mass_in_particles_per_slice_g / num_of_cells_per_slice;
 
                 for (int i = 0; i < psd_particle_sizes.Count; i++)
                 {
                     // careful with using PSD fractions in the next line - we take fraction of non-fines
-                    double total_volume_of_these_particles_mm3 = particles_volume_mm3 * (psd_values[i] / total_non_fines);
+                    double total_volume_of_these_particles_mm3 = particles_volume_per_slice_mm3 * (psd_values[i] / total_non_fines);
 
                     particles.Add(new Particle(psd_particle_sizes[i], total_volume_of_these_particles_mm3));
                 }
@@ -322,7 +323,7 @@ namespace EspMod
 
             public void PrintSlice(int i_slice)
             {
-                var void_concentration_kg_m3 = 1E6 * mass_btw_g[i_slice] / volume_between_particles_mm3;
+                var void_concentration_kg_m3 = 1E6 * mass_btw_g[i_slice] / volume_between_particles_per_slice_mm3;
                 var percent_mass = 1E2 * mass_btw_g[i_slice] / inital_soluble_mass_per_slice;
                 log.Write("Puck slice=" + (i_slice + 1).ToString().PadLeft(3) +
                             "                   Between       Concent_kg_m3=" + void_concentration_kg_m3.ToString("0").PadLeft(4));
@@ -398,7 +399,7 @@ namespace EspMod
                     }
 
                     // outer cell to void transfer
-                    var delta_m_out = cell_2_void_coeff * (m[num_layers - 1] / Cell.void_volume_mm3 - mass_btw_g[i_slice] / volume_between_particles_mm3);
+                    var delta_m_out = cell_2_void_coeff * (m[num_layers - 1] / Cell.void_volume_mm3 - mass_btw_g[i_slice] / volume_between_particles_per_slice_mm3);
 
                     dm[num_layers - 1] -= delta_m_out;
 
@@ -414,9 +415,9 @@ namespace EspMod
                 var fresh_water_mm3 = 1.0E3 * modelling_time_step_sec;  // 1 ml
                 K_the_coefficient = k_the_coefficient;
 
-                if(fresh_water_mm3 > volume_between_particles_mm3 * 0.3)
+                if(fresh_water_mm3 > volume_between_particles_per_slice_mm3 * 0.2)
                 {
-                    log.Write("ERROR: Please decrease the time step, fresh water takes more than 30% of the layer volume");
+                    log.Write("ERROR: Please decrease the time step, fresh water takes more than 20% of the layer volume");
                     has_errors = true;
                     return 0.0;
                 }
@@ -431,18 +432,19 @@ namespace EspMod
                         SimulateParticleDiffusion(i_slice);
 
                     // flow of the fresh water
-                    var prev_delta_layer_mass_g = mass_btw_g[0] * (fresh_water_mm3 / volume_between_particles_mm3);
-                    delta_mass_btw_g[0] -= prev_delta_layer_mass_g;
+                    var mass_passed_to_next_layer_g = mass_btw_g[0] * (fresh_water_mm3 / volume_between_particles_per_slice_mm3);
+                    delta_mass_btw_g[0] -= mass_passed_to_next_layer_g;
 
                     for (int i = 1; i < num_modelling_slices_in_puck; i++)
                     {
-                        var current_delta_layer_mass_g = mass_btw_g[i] * (fresh_water_mm3 / volume_between_particles_mm3);
+                        var current_delta_layer_mass_g = mass_btw_g[i] * (fresh_water_mm3 / volume_between_particles_per_slice_mm3);
 
-                        delta_mass_btw_g[i] += prev_delta_layer_mass_g;
+                        delta_mass_btw_g[i] += mass_passed_to_next_layer_g;
                         delta_mass_btw_g[i] -= current_delta_layer_mass_g;
 
-                        prev_delta_layer_mass_g = current_delta_layer_mass_g;
+                        mass_passed_to_next_layer_g = current_delta_layer_mass_g;
                     }
+                    delta_mass_in_cup_g = mass_passed_to_next_layer_g;
 
                     // Print
                     if ((timestamp - last_print_time + 0.001) > modelling_print_step_sec) // bump the time delta for robust interval comparison
@@ -454,7 +456,7 @@ namespace EspMod
 
                     // update in the cup values
                     volume_in_cup_mm3 += fresh_water_mm3;
-                    mass_in_cup_g += prev_delta_layer_mass_g;
+                    mass_in_cup_g += delta_mass_in_cup_g;
 
                     // Finally update mass values for the next step
                     for (int i_slice = 0; i_slice < num_modelling_slices_in_puck; i_slice++)
