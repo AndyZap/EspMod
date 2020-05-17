@@ -7,7 +7,7 @@ namespace EspMod
 {
     class Program
     {
-        static string Revision = "Espresso extraction model v1.17";
+        static string Revision = "Espresso extraction model v1.18";
 
         public static  class Cell
         {
@@ -66,28 +66,33 @@ namespace EspMod
 
         public class Puck
         {
-            Log    log;
+            Log log;
             public bool has_errors = false;
 
             public List<Particle> particles = new List<Particle>();
 
-            double volume_in_cup_mm3                    = 0.0;
-            double mass_in_cup_g                        = 0.0;
-            double delta_mass_in_cup_g                  = 0.0;
+            double volume_in_cup_mm3 = 0.0;
+            double mass_in_cup_g = 0.0;
+            double delta_mass_in_cup_g = 0.0;
 
-            double modelling_time_step_sec              = 1;
-            double modelling_print_step_sec             = 2;
-            double modelling_total_time_sec             = 2;
-            int    num_modelling_slices_in_puck         = 10;
+            double modelling_time_step_sec = 1;
+            double modelling_print_step_sec = 2;
+            int    num_modelling_slices_in_puck = 10;
 
-            double grounds_density_kg_m3                = 330;
-            double water_density_kg_m3                  = 997;
+            double grounds_density_kg_m3 = 330;
+            double water_density_kg_m3 = 997;
 
-            double soluble_coffee_mass_fraction         = 0.3;
-            double coffee_cell_size_mm                  = 0.03;
+            double soluble_coffee_mass_fraction = 0.3;
+            double coffee_cell_size_mm = 0.03;
 
-            double bean_weight_g                        = 18.0;
+            double bean_weight_g = 18.0;
+            double measured_ey = 20;
 
+            // shot data
+            List<double> espresso_elapsed = new List<double>();
+            List<double> espresso_weight = new List<double>();
+            int espresso_last_index = 0;
+            double espresso_last_weight = 0;
 
             // mass matrix and mass delta for each cell and between particles
             public double[][][] mass_g;
@@ -98,6 +103,8 @@ namespace EspMod
 
             public double volume_between_particles_per_slice_mm3;
             public double inital_soluble_mass_per_slice;
+            public double inital_soluble_mass_between_particles;
+            public double inital_soluble_mass_inside_cells;
 
             public double[][] cell_count_ratio;
             public double[] num_cells_in_outer_layer;
@@ -112,7 +119,6 @@ namespace EspMod
                 // load vars
                 modelling_time_step_sec = config.GetDouble("modelling_time_step_sec"); if (!Check(modelling_time_step_sec)) return;
                 modelling_print_step_sec = config.GetDouble("modelling_print_step_sec"); if (!Check(modelling_print_step_sec)) return;
-                modelling_total_time_sec = config.GetInt("modelling_total_time_sec"); if (!Check(modelling_total_time_sec)) return;
                 num_modelling_slices_in_puck = config.GetInt("num_modelling_slices_in_puck"); if (!Check(num_modelling_slices_in_puck)) return;
 
                 grounds_density_kg_m3 = config.GetDouble("grounds_density_kg_m3"); if (!Check(grounds_density_kg_m3)) return;
@@ -122,6 +128,17 @@ namespace EspMod
                 coffee_cell_size_mm = config.GetDouble("coffee_cell_size_mm"); if (!Check(coffee_cell_size_mm)) return;
 
                 bean_weight_g = config.GetDouble("dsv2_bean_weight"); if (!Check(bean_weight_g)) return;
+                measured_ey = config.GetDouble("measured_ey"); if (!Check(measured_ey)) return;
+
+                espresso_elapsed = config.GetList("espresso_elapsed"); if (!Check(espresso_elapsed)) return;
+                espresso_weight = config.GetList("espresso_weight"); if (!Check(espresso_weight)) return;
+
+                if (espresso_elapsed.Count != espresso_weight.Count)
+                {
+                    log.Write("ERROR: espresso_elapsed array size is different from espresso_weight array size");
+                    has_errors = true;
+                    return;
+                }
 
                 double grounds_volume_fraction = config.GetDouble("grounds_volume_fraction"); if (!Check(grounds_volume_fraction)) return;
                 double void_in_grounds_volume_fraction = config.GetDouble("void_in_grounds_volume_fraction"); if (!Check(void_in_grounds_volume_fraction)) return;
@@ -220,7 +237,7 @@ namespace EspMod
                             cell_count_ratio[i_particle][i_layer] = particles[i_particle].cell_count_ratio[i_layer];
                         }
 
-                        num_cells_in_outer_layer[i_particle] = particles[i_particle].num_of_these_particles * particles[i_particle].cell_layers[num_layers-1].num_cells;
+                        num_cells_in_outer_layer[i_particle] = particles[i_particle].num_of_these_particles * particles[i_particle].cell_layers[num_layers - 1].num_cells;
                     }
                 }
 
@@ -231,7 +248,11 @@ namespace EspMod
                     mass_btw_g[i_slice] = soluble_mass_per_slice * psd0;
                     delta_mass_btw_g[i_slice] = 0;
                 }
+
+                inital_soluble_mass_between_particles = soluble_mass_per_slice * psd0;
+                inital_soluble_mass_inside_cells = mass_per_cell;
             }
+      
 
             bool Check(double x)
             {
@@ -245,6 +266,15 @@ namespace EspMod
             bool Check(int x)
             {
                 if (x == int.MinValue)
+                {
+                    has_errors = true;
+                    return false;
+                }
+                return true;
+            }
+            bool Check(List<double> x)
+            {
+                if (x.Count == 0)
                 {
                     has_errors = true;
                     return false;
@@ -316,7 +346,7 @@ namespace EspMod
 
                 result += mass_in_cup_g;
 
-                var check = Math.Abs(result- inital_soluble_mass_per_slice* num_modelling_slices_in_puck);
+                var check = Math.Abs(result - inital_soluble_mass_per_slice * num_modelling_slices_in_puck);
                 if (check > 1E-8)
                     log.Write("Mass check failed " + check.ToString());
             }
@@ -370,12 +400,36 @@ namespace EspMod
 
                 var concentration = volume_in_cup_mm3 == 0 ? 0.0 : 1E6 * mass_in_cup_g / volume_in_cup_mm3;
                 var ey = 100.0 * mass_in_cup_g / bean_weight_g;
-                log.Write("In the cup: Volume_mL=" + (1E-3* volume_in_cup_mm3).ToString("0.0") +
+                log.Write("In the cup: Volume_mL=" + (1E-3 * volume_in_cup_mm3).ToString("0.0") +
                           " Coffee_mass_g=" + mass_in_cup_g.ToString("0.00") +
-                          " Concent_kg_m3=" + concentration.ToString("0") + 
+                          " Concent_kg_m3=" + concentration.ToString("0") +
                           " EY%=" + ey.ToString("0.0"));
 
                 CheckTotalMass();
+            }
+
+            public double GetEspressoWeight(double timestamp)
+            {
+                int max_index = espresso_elapsed.Count - 1;
+                if (timestamp <= espresso_elapsed[0])
+                    return espresso_weight[0];
+
+                if (timestamp >= espresso_elapsed[max_index])
+                    return espresso_weight[max_index];
+
+
+                double res = 0.0;
+                while (timestamp < espresso_elapsed[espresso_last_index])
+                    espresso_last_index--;
+                while (timestamp >= espresso_elapsed[espresso_last_index+1])
+                    espresso_last_index++;
+
+                res = espresso_weight[espresso_last_index]
+                     + (espresso_weight[espresso_last_index + 1] - espresso_weight[espresso_last_index])
+                     * (timestamp - espresso_elapsed[espresso_last_index])
+                     / (espresso_elapsed[espresso_last_index + 1] - espresso_elapsed[espresso_last_index]);
+
+                return res;
             }
 
             public void SimulateParticleDiffusion(int i_slice)
@@ -412,20 +466,55 @@ namespace EspMod
                 double timestamp = 0.0;
                 double last_print_time = 0.0;
 
-                var fresh_water_mm3 = 1.0E3 * modelling_time_step_sec;  // 1 ml
-                K_the_coefficient = k_the_coefficient;
+                delta_mass_in_cup_g = 0.0;
+                volume_in_cup_mm3 = 0.0;
+                mass_in_cup_g = 0.0;
 
-                if(fresh_water_mm3 > volume_between_particles_per_slice_mm3 * 0.2)
+                for (int i_slice = 0; i_slice < num_modelling_slices_in_puck; i_slice++)
                 {
-                    log.Write("ERROR: Please decrease the time step, fresh water takes more than 20% of the layer volume");
-                    has_errors = true;
-                    return 0.0;
+                    for (int i_particle = 0; i_particle < particles.Count; i_particle++)
+                    {
+                        int num_layers = particles[i_particle].cell_layers.Count;
+
+                        var m = mass_g[i_slice][i_particle];
+                        var dm = delta_mass_g[i_slice][i_particle];
+
+                        for (int i_layer = 0; i_layer < num_layers; i_layer++)
+                        {
+                            m[i_layer] = inital_soluble_mass_inside_cells;
+                            dm[i_layer] = 0;
+                        }
+                    }
                 }
 
-                // assume for a start that water moves at constant 1 ml/sec speed, i.e. fresh_water_ml = 1
+                for (int i_slice = 0; i_slice < num_modelling_slices_in_puck; i_slice++)
+                {
+                    mass_btw_g[i_slice] = inital_soluble_mass_between_particles;
+                    delta_mass_btw_g[i_slice] = 0;
+                }
+
+
+                K_the_coefficient = k_the_coefficient;
+
+                espresso_last_weight = GetEspressoWeight(timestamp);
+
+                var modelling_total_time_sec = espresso_elapsed[espresso_elapsed.Count - 1];
+
                 do
                 {
                     timestamp += modelling_time_step_sec;
+
+                    var espresso_current_weight = GetEspressoWeight(timestamp);
+                    var water_weight_g = espresso_current_weight - espresso_last_weight - delta_mass_in_cup_g;
+                    var fresh_water_mm3 = water_weight_g / (water_density_kg_m3 * 1E-6);
+                    espresso_last_weight = espresso_current_weight;
+
+                    if (fresh_water_mm3 > volume_between_particles_per_slice_mm3 * 0.2)
+                    {
+                        log.Write("ERROR: Please decrease the time step, fresh water takes more than 20% of the layer volume");
+                        has_errors = true;
+                        return 0.0;
+                    }
 
                     // diffusion from particles
                     for (int i_slice = 0; i_slice < num_modelling_slices_in_puck; i_slice++)
@@ -481,11 +570,17 @@ namespace EspMod
                 }
                 while (timestamp < modelling_total_time_sec);
 
-                return 0.0; // TODO
+                var ey = 100.0 * mass_in_cup_g / bean_weight_g;
+
+                var result = ey - measured_ey;
+
+                log.Write("K=" + k_the_coefficient.ToString("0.000") + " result=" + result.ToString("0.000000"));
+
+                return result;
             }
 
             // This is the famous Zeroin from Forsythe book. Initially had it on punchcards in Fortran 
-            double Zeroin(double Ax, double Bx,  // search interval
+            public double Zeroin(double Ax, double Bx,  // search interval
                           double Tol)            // answer tolerance
             {
                 double A, B, C, D, E, Eps, FA, FB, FC, Toll, Xm, P, Q, R, S;
@@ -702,6 +797,30 @@ namespace EspMod
                     return int.MinValue;
                 }
             }
+
+            public List<double> GetList(string key)
+            {
+                List<double> res = new List<double>();
+
+                if (!HasKey(key))
+                    return res;
+
+                var str = settings[key];
+
+                str = str.Replace("{", "").Replace("}", "").Trim();
+
+                if (String.IsNullOrEmpty(str))
+                    return res;
+
+                var words = str.Split(' ');
+                foreach (var w in words)
+                {
+                    var x = Convert.ToDouble(w.Trim());
+                    res.Add(x);
+                }
+
+                return res;
+            }
         }
 
         public class Log
@@ -774,6 +893,12 @@ namespace EspMod
             }
 
             puck.Simulate(k_the_coefficient, print_to_log: true);
+
+            log.Write("Running Zeroin");
+            double fitted_k = puck.Zeroin(0.01, 0.3, 1E-5);
+            log.Write("k = " + fitted_k.ToString());
+
+            puck.Simulate(fitted_k, print_to_log: true);
 
             Console.WriteLine("");
             Console.WriteLine("Finished");

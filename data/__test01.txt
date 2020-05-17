@@ -26,24 +26,23 @@ grounds_volume_fraction			0.8272
 void_in_grounds_volume_fraction	0.644
 
 
-# refer to the shot file name (not use in this case) or list the variables below from the shot file using the same names
-#shot_file_name					__test01.shot
-
 # if the bean weight (in grams) is not saved in the shot file, save it here
 dsv2_bean_weight				18.0
 
-measured_tds					20.0
+measured_ey					    20.0
 
 # example with 1 g per sec and 30 sec shot
-espresso_elapsed                {0.0 30}
-espresso_weight                 {0.0 30}
+espresso_elapsed                {0.0 36}
+espresso_weight                 {0.0 36}
+
+# refer to the shot file name (not use in this case) or list the variables below from the shot file using the same names
+#shot_file_name					__test01.shot
 
 # modelling parameteres
-modelling_time_step_sec			0.1
+modelling_time_step_sec			0.02
 modelling_print_step_sec		2
-modelling_total_time_sec		20
-num_modelling_slices_in_puck    1
-k_the_coefficient               0.4
+num_modelling_slices_in_puck    10
+k_the_coefficient               0.3
 
 # modelling_mode: select from "calibrate" and "simulate"
 modelling_mode					simulate
