@@ -88,6 +88,9 @@ namespace EspMod
             double bean_weight_g = 18.0;
             double measured_ey = 20;
 
+            public enum ModellingMode { Calibrate, Simulate };
+            public ModellingMode modelling_mode = ModellingMode.Simulate;
+
             // shot data
             List<double> espresso_elapsed = new List<double>();
             List<double> espresso_weight = new List<double>();
@@ -142,6 +145,16 @@ namespace EspMod
 
                 double grounds_volume_fraction = config.GetDouble("grounds_volume_fraction"); if (!Check(grounds_volume_fraction)) return;
                 double void_in_grounds_volume_fraction = config.GetDouble("void_in_grounds_volume_fraction"); if (!Check(void_in_grounds_volume_fraction)) return;
+
+                string modelling_mode_str = config.GetString("modelling_mode"); if (!Check(modelling_mode_str)) return;
+                if(modelling_mode_str == "simulate") modelling_mode = ModellingMode.Simulate;
+                else if (modelling_mode_str == "calibrate") modelling_mode = ModellingMode.Calibrate;
+                else
+                {
+                    log.Write("ERROR: do not understand modelling_mode, please use simulate or calibrate");
+                    has_errors = true;
+                    return;
+                }
 
                 // load PSD
                 List<int> psd_particle_sizes = new List<int>();
@@ -252,8 +265,17 @@ namespace EspMod
                 inital_soluble_mass_between_particles = soluble_mass_per_slice * psd0;
                 inital_soluble_mass_inside_cells = mass_per_cell;
             }
-      
 
+
+            bool Check(string x)
+            {
+                if (x == "")
+                {
+                    has_errors = true;
+                    return false;
+                }
+                return true;
+            }
             bool Check(double x)
             {
                 if (x == double.MinValue)
@@ -400,8 +422,15 @@ namespace EspMod
 
                 var concentration = volume_in_cup_mm3 == 0 ? 0.0 : 1E6 * mass_in_cup_g / volume_in_cup_mm3;
                 var ey = 100.0 * mass_in_cup_g / bean_weight_g;
+                var water_weight_g = volume_in_cup_mm3 * water_density_kg_m3 * 1E-6;
+                var total_weight_g = water_weight_g + mass_in_cup_g;
+                var ratio = total_weight_g / bean_weight_g;
+
+
                 log.Write("In the cup: Volume_mL=" + (1E-3 * volume_in_cup_mm3).ToString("0.0") +
                           " Coffee_mass_g=" + mass_in_cup_g.ToString("0.00") +
+                          " Total_mass_g=" + total_weight_g.ToString("0.00") +
+                          " Ratio=1:" + ratio.ToString("0.0") +
                           " Concent_kg_m3=" + concentration.ToString("0") +
                           " EY%=" + ey.ToString("0.0"));
 
@@ -465,6 +494,7 @@ namespace EspMod
             {
                 double timestamp = 0.0;
                 double last_print_time = 0.0;
+                double ey;
 
                 delta_mass_in_cup_g = 0.0;
                 volume_in_cup_mm3 = 0.0;
@@ -499,6 +529,9 @@ namespace EspMod
                 espresso_last_weight = GetEspressoWeight(timestamp);
 
                 var modelling_total_time_sec = espresso_elapsed[espresso_elapsed.Count - 1];
+
+                if (print_to_log)
+                    Print(timestamp);
 
                 do
                 {
@@ -543,9 +576,7 @@ namespace EspMod
                         last_print_time = timestamp;
                     }
 
-                    // update in the cup values
-                    volume_in_cup_mm3 += fresh_water_mm3;
-                    mass_in_cup_g += delta_mass_in_cup_g;
+                    ey = 100.0 * mass_in_cup_g / bean_weight_g;
 
                     // Finally update mass values for the next step
                     for (int i_slice = 0; i_slice < num_modelling_slices_in_puck; i_slice++)
@@ -567,14 +598,19 @@ namespace EspMod
                             }
                         }
                     }
+
+                    // update in the cup values
+                    volume_in_cup_mm3 += fresh_water_mm3;
+                    mass_in_cup_g += delta_mass_in_cup_g;
                 }
                 while (timestamp < modelling_total_time_sec);
 
-                var ey = 100.0 * mass_in_cup_g / bean_weight_g;
-
                 var result = ey - measured_ey;
 
-                log.Write("K=" + k_the_coefficient.ToString("0.000") + " result=" + result.ToString("0.000000"));
+                if (modelling_mode == ModellingMode.Calibrate && print_to_log == false)
+                    log.Write("k_the_coefficient=" + k_the_coefficient.ToString("0.000000") 
+                        + "  measured EY=" + measured_ey.ToString("0.000000") 
+                        + "  calculated EY=" + ey.ToString("0.000000"));
 
                 return result;
             }
@@ -882,7 +918,7 @@ namespace EspMod
                 return;
             }
 
-            puck.Print(timestamp: 0.0);
+            
 
             double k_the_coefficient = config.GetDouble("k_the_coefficient");
             if(k_the_coefficient == double.MinValue)
@@ -892,13 +928,27 @@ namespace EspMod
                 return;
             }
 
-            puck.Simulate(k_the_coefficient, print_to_log: true);
+            if (puck.modelling_mode == Puck.ModellingMode.Simulate)
+                puck.Simulate(k_the_coefficient, print_to_log: true);
+            else if (puck.modelling_mode == Puck.ModellingMode.Calibrate)
+            {
+                log.Write("Running the root finding algorithm ...");
+                double fitted_k = puck.Zeroin(0.01, 0.35, 1E-5);
+                double result = puck.Simulate(fitted_k, print_to_log: false);
+                if (Math.Abs(result) < 1E-4)
+                {
+                    log.Write("");
+                    log.Write("==> This is the value for k_the_coefficient = " + fitted_k.ToString("0.000000"));
+                    log.Write("");
 
-            log.Write("Running Zeroin");
-            double fitted_k = puck.Zeroin(0.01, 0.3, 1E-5);
-            log.Write("k = " + fitted_k.ToString());
-
-            puck.Simulate(fitted_k, print_to_log: true);
+                    puck.Simulate(fitted_k, print_to_log: true);
+                }
+                else
+                {
+                    log.Write("");
+                    log.Write("ERROR: cannot find k_the_coefficient to match the measured EY. Review the inputs, specially the PSD values");
+                }
+            }
 
             Console.WriteLine("");
             Console.WriteLine("Finished");
