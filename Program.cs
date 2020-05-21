@@ -7,7 +7,7 @@ namespace EspMod
 {
     class Program
     {
-        static string Revision = "Espresso extraction model v1.18";
+        static string Revision = "Espresso extraction model v1.19";
 
         public static  class Cell
         {
@@ -266,7 +266,6 @@ namespace EspMod
                 inital_soluble_mass_inside_cells = mass_per_cell;
             }
 
-
             bool Check(string x)
             {
                 if (x == "")
@@ -304,7 +303,7 @@ namespace EspMod
                 return true;
             }
 
-            public void PrintParticle(int i_slice, int i_particle)
+            public void PrintParticle(int[] slice_list, int i_particle)
             {
                 StringBuilder sb = new StringBuilder();
 
@@ -313,14 +312,18 @@ namespace EspMod
                 sb.Append("   Particles with " + num_cells.ToString() + " cell layers; Per layer     Concent_kg_m3=");
                 for (int i_layer = num_cells - 1; i_layer >= 0; i_layer--)
                 {
-                    var concentration_kg_m3 = 1E6 * mass_g[i_slice][i_particle][i_layer] / Cell.void_volume_mm3;
+                    double concentration_kg_m3 = 0.0;
+                    foreach (var i_slice in slice_list)
+                        concentration_kg_m3 += 1E6 * mass_g[i_slice][i_particle][i_layer] / Cell.void_volume_mm3;
+                    concentration_kg_m3 /= slice_list.Length;
+
                     sb.Append(concentration_kg_m3.ToString("0").PadLeft(4));
                     if (i_layer != 0)
                         sb.Append(", ");
                 }
                 log.Write(sb.ToString());
             }
-            public double PrintParticleMass(int i_slice, int i_particle)
+            public double PrintParticleMass(int[] slice_list, int i_particle)
             {
                 StringBuilder sb = new StringBuilder();
 
@@ -331,8 +334,11 @@ namespace EspMod
                 sb.Append("   Particles with " + num_cells.ToString() + " cell layers; Per layer % of initial mass=");
                 for (int i_layer = num_cells - 1; i_layer >= 0; i_layer--)
                 {
-                    var percent_mass = mass_g[i_slice][i_particle][i_layer]
+                    double percent_mass = 0.0;
+                    foreach (var i_slice in slice_list)
+                        percent_mass += mass_g[i_slice][i_particle][i_layer]
                                         * particles[i_particle].num_of_these_particles * particles[i_particle].cell_layers[i_layer].num_cells;
+                    percent_mass /= slice_list.Length;
 
                     percent_mass *= 1E2 / inital_soluble_mass_per_slice;
 
@@ -373,22 +379,31 @@ namespace EspMod
                     log.Write("Mass check failed " + check.ToString());
             }
 
-            public void PrintSlice(int i_slice)
+            public void PrintSlice(int[] slice_list, string caption)
             {
-                var void_concentration_kg_m3 = 1E6 * mass_btw_g[i_slice] / volume_between_particles_per_slice_mm3;
-                var percent_mass = 1E2 * mass_btw_g[i_slice] / inital_soluble_mass_per_slice;
-                log.Write("Puck slice=" + (i_slice + 1).ToString().PadLeft(3) +
-                            "                   Between       Concent_kg_m3=" + void_concentration_kg_m3.ToString("0").PadLeft(4));
+                double void_concentration_kg_m3 = 0.0;
+                double percent_mass = 0.0;
+
+                foreach (var i_slice in slice_list)
+                {
+                    void_concentration_kg_m3 += 1E6 * mass_btw_g[i_slice] / volume_between_particles_per_slice_mm3;
+                    percent_mass += 1E2 * mass_btw_g[i_slice] / inital_soluble_mass_per_slice;
+                }
+                void_concentration_kg_m3 /= slice_list.Length;
+                percent_mass /= slice_list.Length;
+
+                log.Write(caption.PadRight(30) +
+                               "   Between       Concent_kg_m3=" + void_concentration_kg_m3.ToString("0").PadLeft(4));
 
                 for (int i_particle = 0; i_particle < particles.Count; i_particle++)
-                    PrintParticle(i_slice, i_particle);
+                    PrintParticle(slice_list, i_particle);
 
                 log.Write("              " +
                             "                   Between   % of initial mass=" + percent_mass.ToString("0").PadLeft(4));
 
                 double sum_top_two = 0;
                 for (int i_particle = 0; i_particle < particles.Count; i_particle++)
-                    sum_top_two += PrintParticleMass(i_slice, i_particle);
+                    sum_top_two += PrintParticleMass(slice_list, i_particle);
 
                 log.Write("    Top two layers, sum over all particles % of initial mass=" + sum_top_two.ToString("0").PadLeft(4));
 
@@ -400,24 +415,62 @@ namespace EspMod
                 log.Write("-------------------------------------------------------------------------------");
                 log.Write("Time=" + timestamp.ToString("0.00") + " sec");
 
-                log.Write("");
-                log.Write("Initial soluble mass per slice= " + inital_soluble_mass_per_slice.ToString("0.00").PadLeft(3) +
-                          " g. The percentage of the initial mass below is given relative to this value");
-
-                log.Write("");
-
                 if (num_modelling_slices_in_puck == 1)
-                    PrintSlice(0);
+                {
+                    log.Write("");
+                    log.Write("Initial soluble mass in the puck= " + inital_soluble_mass_per_slice.ToString("0.00").PadLeft(3) +
+                              " g. The percentage of the initial mass below is given relative to this value");
+
+                    log.Write("");
+
+                    PrintSlice(new int[] { 0 }, "Whole puck");
+                }
                 else if (num_modelling_slices_in_puck == 2)
                 {
-                    PrintSlice(0);
-                    PrintSlice(1);
+                    log.Write("");
+                    log.Write("Initial soluble mass in half of the puck= " + inital_soluble_mass_per_slice.ToString("0.00").PadLeft(3) +
+                              " g. The percentage of the initial mass below is given relative to this value");
+
+                    log.Write("");
+
+                    PrintSlice(new int[] { 0 }, "Top half of the puck");
+                    PrintSlice(new int[] { 1 }, "Bottom half of the puck");
                 }
                 else if (num_modelling_slices_in_puck > 2)
                 {
-                    PrintSlice(0);
-                    PrintSlice(num_modelling_slices_in_puck / 2);
-                    PrintSlice(num_modelling_slices_in_puck - 1);
+                    log.Write("");
+                    log.Write("Initial soluble mass in third of the puck= " + 
+                              (inital_soluble_mass_per_slice * num_modelling_slices_in_puck / 3).ToString("0.00").PadLeft(3) +
+                              " g. The percentage of the initial mass below is given relative to this value");
+
+                    log.Write("");
+
+                    int slice_counter = 0;
+
+                    List<int> slice_list = new List<int>();
+                    for (int i = 0; i < num_modelling_slices_in_puck / 3; i++)
+                    {
+                        slice_list.Add(slice_counter);
+                        slice_counter++;
+                    }
+                    PrintSlice(slice_list.ToArray(), "Top third of the puck");
+
+                    slice_list.Clear();
+                    for (int i = 0; i < num_modelling_slices_in_puck / 3; i++)
+                    {
+                        slice_list.Add(slice_counter);
+                        slice_counter++;
+                    }
+                    PrintSlice(slice_list.ToArray(), "Middle third of the puck");
+
+
+                    slice_list.Clear();
+                    for (int i = 0; i < num_modelling_slices_in_puck / 3; i++)
+                    {
+                        slice_list.Add(slice_counter);
+                        slice_counter++;
+                    }
+                    PrintSlice(slice_list.ToArray(), "Bottom third of the puck");
                 }
 
                 var concentration = volume_in_cup_mm3 == 0 ? 0.0 : 1E6 * mass_in_cup_g / volume_in_cup_mm3;
