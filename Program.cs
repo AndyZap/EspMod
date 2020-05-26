@@ -7,7 +7,7 @@ namespace EspMod
 {
     class Program
     {
-        static string Revision = "Espresso extraction model v1.19";
+        static string Revision = "Espresso extraction model v1.20";
 
         public static  class Cell
         {
@@ -73,7 +73,6 @@ namespace EspMod
 
             double volume_in_cup_mm3 = 0.0;
             double mass_in_cup_g = 0.0;
-            double delta_mass_in_cup_g = 0.0;
 
             double modelling_time_step_sec = 1;
             double modelling_print_step_sec = 2;
@@ -113,6 +112,13 @@ namespace EspMod
             public double[] num_cells_in_outer_layer;
 
             public double K_the_coefficient;
+
+            // var for the plots
+            List<double> plot_time = new List<double>();
+            List<double> plot_ey = new List<double>();
+            List<double> plot_remain_mass_top = new List<double>();
+            List<double> plot_remain_mass_middle = new List<double>();
+            List<double> plot_remain_mass_bottom = new List<double>();
 
             public Puck(Config config, Log log_)
             {
@@ -379,7 +385,7 @@ namespace EspMod
                     log.Write("Mass check failed " + check.ToString());
             }
 
-            public void PrintSlice(int[] slice_list, string caption)
+            public double PrintSlice(int[] slice_list, string caption)
             {
                 double void_concentration_kg_m3 = 0.0;
                 double percent_mass = 0.0;
@@ -408,12 +414,18 @@ namespace EspMod
                 log.Write("    Top two layers, sum over all particles % of initial mass=" + sum_top_two.ToString("0").PadLeft(4));
 
                 log.Write("");
+
+                return sum_top_two;
             }
             public void Print(double timestamp)
             {
                 log.Write("");
                 log.Write("-------------------------------------------------------------------------------");
                 log.Write("Time=" + timestamp.ToString("0.00") + " sec");
+
+                double top_sum_two = 0.0;
+                double middle_sum_two = 0.0;
+                double bottom_sum_two = 0.0;
 
                 if (num_modelling_slices_in_puck == 1)
                 {
@@ -439,7 +451,7 @@ namespace EspMod
                 else if (num_modelling_slices_in_puck > 2)
                 {
                     log.Write("");
-                    log.Write("Initial soluble mass in third of the puck= " + 
+                    log.Write("Initial soluble mass in third of the puck= " +
                               (inital_soluble_mass_per_slice * num_modelling_slices_in_puck / 3).ToString("0.00").PadLeft(3) +
                               " g. The percentage of the initial mass below is given relative to this value");
 
@@ -453,7 +465,7 @@ namespace EspMod
                         slice_list.Add(slice_counter);
                         slice_counter++;
                     }
-                    PrintSlice(slice_list.ToArray(), "Top third of the puck");
+                    top_sum_two = PrintSlice(slice_list.ToArray(), "Top third of the puck");
 
                     slice_list.Clear();
                     for (int i = 0; i < num_modelling_slices_in_puck / 3; i++)
@@ -461,7 +473,7 @@ namespace EspMod
                         slice_list.Add(slice_counter);
                         slice_counter++;
                     }
-                    PrintSlice(slice_list.ToArray(), "Middle third of the puck");
+                    middle_sum_two = PrintSlice(slice_list.ToArray(), "Middle third of the puck");
 
 
                     slice_list.Clear();
@@ -470,7 +482,7 @@ namespace EspMod
                         slice_list.Add(slice_counter);
                         slice_counter++;
                     }
-                    PrintSlice(slice_list.ToArray(), "Bottom third of the puck");
+                    bottom_sum_two = PrintSlice(slice_list.ToArray(), "Bottom third of the puck");
                 }
 
                 var concentration = volume_in_cup_mm3 == 0 ? 0.0 : 1E6 * mass_in_cup_g / volume_in_cup_mm3;
@@ -488,6 +500,35 @@ namespace EspMod
                           " EY%=" + ey.ToString("0.0"));
 
                 CheckTotalMass();
+
+                plot_time.Add(timestamp);
+                plot_ey.Add(ey);
+                plot_remain_mass_top.Add(top_sum_two);
+                plot_remain_mass_middle.Add(middle_sum_two);
+                plot_remain_mass_bottom.Add(bottom_sum_two);
+            }
+
+            void SaveList(string fname, List<double> x, List<double> y)
+            {
+                StringBuilder sb = new StringBuilder();
+                for(int i = 0; i < x.Count; i++)
+                {
+                    sb.AppendLine(x[i].ToString() + "\t" + y[i].ToString());
+                }
+
+                File.WriteAllText(fname, sb.ToString());
+            }
+            public void SavePlots(string folder_name)
+            {
+                string plots_folder_name = folder_name == "" ? "plots" : folder_name + "\\plots";
+
+                if (!Directory.Exists(plots_folder_name))
+                    Directory.CreateDirectory(plots_folder_name);
+
+                SaveList(plots_folder_name + "\\plot_ey.txt", plot_time, plot_ey);
+                SaveList(plots_folder_name + "\\plot_remain_mass_top.txt", plot_time, plot_remain_mass_top);
+                SaveList(plots_folder_name + "\\plot_remain_mass_middle.txt", plot_time, plot_remain_mass_middle);
+                SaveList(plots_folder_name + "\\plot_remain_mass_bottom.txt", plot_time, plot_remain_mass_bottom);
             }
 
             public double GetEspressoWeight(double timestamp)
@@ -547,9 +588,9 @@ namespace EspMod
             {
                 double timestamp = 0.0;
                 double last_print_time = 0.0;
+                double delta_mass_in_cup_g = 0.0;
                 double ey;
 
-                delta_mass_in_cup_g = 0.0;
                 volume_in_cup_mm3 = 0.0;
                 mass_in_cup_g = 0.0;
 
@@ -982,7 +1023,10 @@ namespace EspMod
             }
 
             if (puck.modelling_mode == Puck.ModellingMode.Simulate)
+            {
                 puck.Simulate(k_the_coefficient, print_to_log: true);
+                puck.SavePlots(Path.GetDirectoryName(args[0]));
+            }
             else if (puck.modelling_mode == Puck.ModellingMode.Calibrate)
             {
                 log.Write("Running the root finding algorithm ...");
@@ -995,6 +1039,7 @@ namespace EspMod
                     log.Write("");
 
                     puck.Simulate(fitted_k, print_to_log: true);
+                    puck.SavePlots(Path.GetDirectoryName(args[0]));
                 }
                 else
                 {
