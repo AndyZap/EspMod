@@ -33,21 +33,33 @@ dsv2_bean_weight				18.0
 espresso_elapsed                {0.0 36}
 espresso_weight                 {0.0 36}
 
+# trim the espresso_weight data. Remove back to avoid slow dripping while the pump already stop. Remove front to account for the puck prewetting time.
+espresso_weight_trim_front_sec  5
+espresso_weight_trim_back_g     1
+
+espresso_weight_trim_front_sec  0
+espresso_weight_trim_back_g     0
+
 # refer to the shot file name (not used in this case) or list the variables from the shot file using the same names
 #shot_file_name					__test01.shot
 
 # modelling parameteres
 modelling_time_step_sec			0.02
-modelling_print_step_sec		2
-num_modelling_slices_in_puck    9
+modelling_print_step_sec		1
+num_modelling_slices_in_puck    12
+
 
 # modelling_mode: select from "calibrate" and "simulate"
-modelling_mode					simulate
+modelling_mode					calibrate
 
 # measured EY, % - used during "calibrate" to find k_the_coefficient
 measured_ey					    20.0
 
 # this is the coefficient to specify the diffusion rate. This value is used during "simulate"
 k_the_coefficient               0.246006
+
+# plot parameters
+plots_enable			        1
+plots_tag			            _2
 
 wait_for_keystroke				0

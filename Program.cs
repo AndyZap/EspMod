@@ -7,7 +7,7 @@ namespace EspMod
 {
     class Program
     {
-        static string Revision = "Espresso extraction model v1.20";
+        static string Revision = "Espresso extraction model v1.21";
 
         public static  class Cell
         {
@@ -93,8 +93,14 @@ namespace EspMod
             // shot data
             List<double> espresso_elapsed = new List<double>();
             List<double> espresso_weight = new List<double>();
-            int espresso_last_index = 0;
+            int    espresso_last_index = 0;
             double espresso_last_weight = 0;
+            double espresso_weight_trim_front_sec = 5;
+            double espresso_weight_trim_back_g = 1;
+
+            // plots
+            int    plots_enable = 1;
+            string plots_tag = "";
 
             // mass matrix and mass delta for each cell and between particles
             public double[][][] mass_g;
@@ -116,6 +122,7 @@ namespace EspMod
             // var for the plots
             List<double> plot_time = new List<double>();
             List<double> plot_ey = new List<double>();
+            List<double> plot_input_weight = new List<double>();
             List<double> plot_remain_mass_top = new List<double>();
             List<double> plot_remain_mass_middle = new List<double>();
             List<double> plot_remain_mass_bottom = new List<double>();
@@ -129,6 +136,9 @@ namespace EspMod
                 modelling_time_step_sec = config.GetDouble("modelling_time_step_sec"); if (!Check(modelling_time_step_sec)) return;
                 modelling_print_step_sec = config.GetDouble("modelling_print_step_sec"); if (!Check(modelling_print_step_sec)) return;
                 num_modelling_slices_in_puck = config.GetInt("num_modelling_slices_in_puck"); if (!Check(num_modelling_slices_in_puck)) return;
+
+                plots_enable = config.GetInt("plots_enable"); if (!Check(plots_enable)) return;
+                plots_tag = config.GetString("plots_tag");
 
                 grounds_density_kg_m3 = config.GetDouble("grounds_density_kg_m3"); if (!Check(grounds_density_kg_m3)) return;
                 water_density_kg_m3 = config.GetDouble("water_density_kg_m3"); if (!Check(water_density_kg_m3)) return;
@@ -148,6 +158,11 @@ namespace EspMod
                     has_errors = true;
                     return;
                 }
+
+                espresso_weight_trim_front_sec = config.GetDouble("espresso_weight_trim_front_sec"); if (!Check(espresso_weight_trim_front_sec)) return;
+                espresso_weight_trim_back_g = config.GetDouble("espresso_weight_trim_back_g"); if (!Check(espresso_weight_trim_back_g)) return;
+
+                EspressoWeightTrimBack();
 
                 double grounds_volume_fraction = config.GetDouble("grounds_volume_fraction"); if (!Check(grounds_volume_fraction)) return;
                 double void_in_grounds_volume_fraction = config.GetDouble("void_in_grounds_volume_fraction"); if (!Check(void_in_grounds_volume_fraction)) return;
@@ -503,6 +518,7 @@ namespace EspMod
 
                 plot_time.Add(timestamp);
                 plot_ey.Add(ey);
+                plot_input_weight.Add(espresso_last_weight);
                 plot_remain_mass_top.Add(top_sum_two);
                 plot_remain_mass_middle.Add(middle_sum_two);
                 plot_remain_mass_bottom.Add(bottom_sum_two);
@@ -520,15 +536,18 @@ namespace EspMod
             }
             public void SavePlots(string folder_name)
             {
+                if(plots_enable != 1) return;
+
                 string plots_folder_name = folder_name == "" ? "plots" : folder_name + "\\plots";
 
                 if (!Directory.Exists(plots_folder_name))
                     Directory.CreateDirectory(plots_folder_name);
 
-                SaveList(plots_folder_name + "\\plot_ey.txt", plot_time, plot_ey);
-                SaveList(plots_folder_name + "\\plot_remain_mass_top.txt", plot_time, plot_remain_mass_top);
-                SaveList(plots_folder_name + "\\plot_remain_mass_middle.txt", plot_time, plot_remain_mass_middle);
-                SaveList(plots_folder_name + "\\plot_remain_mass_bottom.txt", plot_time, plot_remain_mass_bottom);
+                SaveList(plots_folder_name + "\\plot_ey" + plots_tag + ".txt", plot_time, plot_ey);
+                SaveList(plots_folder_name + "\\plot_input_weight" + plots_tag + ".txt", plot_time, plot_input_weight);
+                SaveList(plots_folder_name + "\\plot_remain_mass_top" + plots_tag + ".txt", plot_time, plot_remain_mass_top);
+                SaveList(plots_folder_name + "\\plot_remain_mass_middle" + plots_tag + ".txt", plot_time, plot_remain_mass_middle);
+                SaveList(plots_folder_name + "\\plot_remain_mass_bottom" + plots_tag + ".txt", plot_time, plot_remain_mass_bottom);
             }
 
             public double GetEspressoWeight(double timestamp)
@@ -552,7 +571,27 @@ namespace EspMod
                      * (timestamp - espresso_elapsed[espresso_last_index])
                      / (espresso_elapsed[espresso_last_index + 1] - espresso_elapsed[espresso_last_index]);
 
-                return res;
+                return Math.Max(0.0, res);
+            }
+
+            void EspressoWeightTrimBack()
+            {
+                int max_index = espresso_elapsed.Count - 1;
+                double max_value = espresso_weight[max_index];
+
+                int new_index = max_index;
+                while(max_value - espresso_weight[new_index] < espresso_weight_trim_back_g)
+                {
+                    new_index--;
+                    if (new_index == 0)
+                        break;
+                }
+
+                for(int i = 0; i < max_index- new_index; i++)
+                {
+                    espresso_elapsed.RemoveAt(espresso_elapsed.Count - 1);
+                    espresso_weight.RemoveAt(espresso_weight.Count - 1);
+                }
             }
 
             public void SimulateParticleDiffusion(int i_slice)
@@ -586,8 +625,8 @@ namespace EspMod
 
             public double Simulate(double k_the_coefficient, bool print_to_log = false)
             {
-                double timestamp = 0.0;
-                double last_print_time = 0.0;
+                double timestamp = espresso_weight_trim_front_sec;
+                double last_print_time = espresso_weight_trim_front_sec;
                 double delta_mass_in_cup_g = 0.0;
                 double ey;
 
