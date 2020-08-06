@@ -554,8 +554,11 @@ namespace EspMod
 
             public void SaveExtra()
             {
+                if (has_errors)
+                    return;
+
                 log.Write("");
-                log.Write("Max percent of water replaced at each time step per slice=" + max_percent_water_replaced_each_time_step.ToString("0.0"));
+                log.Write("Max percent of water replaced at each time step per slice=" + max_percent_water_replaced_each_time_step.ToString("0.0") + "%");
             }
 
             public double GetEspressoWeight(double timestamp)
@@ -687,6 +690,7 @@ namespace EspMod
                     var percent_water_replaced_each_time_step = 100.0 * fresh_water_mm3 / volume_between_particles_per_slice_mm3;
                     if (percent_water_replaced_each_time_step > 20.0)
                     {
+                        log.Write("");
                         log.Write("ERROR: Please decrease the time step, fresh water takes more than 20% of the layer volume");
                         has_errors = true;
                         return 0.0;

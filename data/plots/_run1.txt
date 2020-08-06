@@ -1,0 +1,37 @@
+set term emf font "arial,12" size 800, 500
+set output "plot_ey.emf"
+
+#set term pdfcairo font "arial,10" 
+#set output "plot_ey.pdf"
+
+#set size 1, 1
+#set term pngcairo size 1000, 600
+#set output "figure2.png"
+
+#set title "Test caption"
+set ylabel "EY, %"
+set xlabel "Time, sec"
+#set xr [0.0:12.0]
+
+plot \
+"plot_ey.txt" with lines lw 3 lt rgb "blue" dt solid title ""
+
+# ========================================
+set output "plot_remain_mass.emf"
+
+set ylabel "% remaining mass top two layers"
+set xlabel "Time, sec"
+
+plot \
+"plot_remain_mass_top.txt" with lines lw 3 lt rgb "blue" dt "." title "top", \
+"plot_remain_mass_middle.txt" with lines lw 3 lt rgb "blue" dt solid title "middle", \
+"plot_remain_mass_bottom.txt" with lines lw 3 lt rgb "blue" dt "-" title "bottom"
+
+# ========================================
+set output "plot_input_weight.emf"
+
+set ylabel "input espresso weight, g"
+set xlabel "Time, sec"
+
+plot \
+"plot_input_weight.txt" with lines lw 3 lt rgb "blue" dt solid title ""

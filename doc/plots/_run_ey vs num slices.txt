@@ -1,0 +1,12 @@
+set term emf font "arial,12" size 800, 500
+set output "plot_remain_mass.emf"
+
+set ylabel "% of total soluble mass in a layer"
+set xlabel "Particle size, mm"
+set xr [0.15:0.45]
+
+
+plot \
+"init_mass_1.txt" with lines lw 3 lt rgb "blue" dt "." title "top layer", \
+"init_mass_2.txt" with lines lw 3 lt rgb "blue" dt solid title "first layer below top", \
+"init_mass_3.txt" with lines lw 3 lt rgb "blue" dt "-" title "second layer below top"
